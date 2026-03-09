@@ -2002,7 +2002,10 @@ function updateTimeframeUI() {
 }
 
 function changeTimeframe(newInterval) {
-    if (newInterval === KLINE_INTERVAL) return;
+    if (newInterval === KLINE_INTERVAL) {
+        showToast(`✅ Ya estás usando la temporalidad ${newInterval}`, 'info');
+        return;
+    }
     KLINE_INTERVAL = newInterval;
     updateTimeframeUI();
     console.log(`⏱️ Temporalidad cambiada a ${newInterval}`);

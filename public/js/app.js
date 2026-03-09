@@ -724,9 +724,585 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
+// ==================== TAB NAVIGATION ====================
+function switchTab(tabName) {
+    const views = ['dashboard', 'chart', 'trackrecord', 'academia', 'config'];
+    views.forEach(v => {
+        const el = document.getElementById(`view-${v}`);
+        const btn = document.getElementById(`tab-${v}`);
+        if (el) el.classList.toggle('hidden', v !== tabName);
+        if (btn) btn.classList.toggle('active', v === tabName);
+    });
+
+    // Initialize chart when tab is first opened
+    if (tabName === 'chart' && !tvChart) initTradingViewChart();
+    if (tabName === 'trackrecord') renderTrackRecord();
+    if (tabName === 'academia') loadAcademiaProgress();
+    if (tabName === 'config') loadConfigValues();
+}
+
+// ==================== TRADINGVIEW LIGHTWEIGHT CHART ====================
+let tvChart = null;
+let tvCandleSeries = null;
+let tvEma9Series = null;
+let tvEma21Series = null;
+let tvVolumeSeries = null;
+let chartWs = null;
+let chartSignalMarkers = [];
+
+function initTradingViewChart() {
+    const container = document.getElementById('tvChartContainer');
+    if (!container || typeof LightweightCharts === 'undefined') {
+        console.error('Chart container or LightweightCharts not found');
+        return;
+    }
+
+    tvChart = LightweightCharts.createChart(container, {
+        layout: {
+            background: { color: '#0a0a0f' },
+            textColor: '#6b7280',
+            fontSize: 11,
+        },
+        grid: {
+            vertLines: { color: 'rgba(255,255,255,0.03)' },
+            horzLines: { color: 'rgba(255,255,255,0.03)' },
+        },
+        crosshair: {
+            mode: LightweightCharts.CrosshairMode.Normal,
+            vertLine: { color: 'rgba(0,255,65,0.3)', width: 1 },
+            horzLine: { color: 'rgba(0,255,65,0.3)', width: 1 },
+        },
+        rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)' },
+        timeScale: { borderColor: 'rgba(255,255,255,0.1)', timeVisible: true, secondsVisible: false },
+        handleScroll: { vertTouchDrag: false },
+    });
+
+    tvCandleSeries = tvChart.addCandlestickSeries({
+        upColor: '#00ff41',
+        downColor: '#ff3b3b',
+        borderUpColor: '#00ff41',
+        borderDownColor: '#ff3b3b',
+        wickUpColor: '#00ff41',
+        wickDownColor: '#ff3b3b',
+    });
+
+    tvEma9Series = tvChart.addLineSeries({ color: '#00ff41', lineWidth: 1, title: 'EMA 9' });
+    tvEma21Series = tvChart.addLineSeries({ color: '#ff6d00', lineWidth: 1, title: 'EMA 21' });
+
+    tvVolumeSeries = tvChart.addHistogramSeries({
+        color: '#26a69a',
+        priceFormat: { type: 'volume' },
+        priceScaleId: '',
+    });
+    tvVolumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
+
+    loadChartData();
+
+    // Responsive resize
+    const ro = new ResizeObserver(() => { tvChart.applyOptions({ width: container.clientWidth }); });
+    ro.observe(container);
+}
+
+async function loadChartData() {
+    const symbol = document.getElementById('chartSymbol')?.value || 'btcusdt';
+    const interval = document.getElementById('chartInterval')?.value || '15m';
+
+    try {
+        const resp = await fetch(`${BINANCE_API}/klines?symbol=${symbol.toUpperCase()}&interval=${interval}&limit=300`);
+        const data = await resp.json();
+
+        const candles = data.map(k => ({
+            time: Math.floor(k[0] / 1000),
+            open: parseFloat(k[1]),
+            high: parseFloat(k[2]),
+            low: parseFloat(k[3]),
+            close: parseFloat(k[4]),
+        }));
+
+        const volumes = data.map(k => ({
+            time: Math.floor(k[0] / 1000),
+            value: parseFloat(k[5]),
+            color: parseFloat(k[4]) >= parseFloat(k[1]) ? 'rgba(0,255,65,0.2)' : 'rgba(255,59,59,0.2)',
+        }));
+
+        if (tvCandleSeries) tvCandleSeries.setData(candles);
+        if (tvVolumeSeries) tvVolumeSeries.setData(volumes);
+
+        // Calculate and draw EMAs
+        const closes = candles.map(c => c.close);
+        const ema9Data = calcEMAArray(closes, 9).map((v, i) => ({ time: candles[i].time, value: v })).filter(d => d.value);
+        const ema21Data = calcEMAArray(closes, 21).map((v, i) => ({ time: candles[i].time, value: v })).filter(d => d.value);
+
+        if (tvEma9Series) tvEma9Series.setData(ema9Data);
+        if (tvEma21Series) tvEma21Series.setData(ema21Data);
+
+        // Add signal markers from track record
+        applyChartMarkers();
+
+        tvChart.timeScale().fitContent();
+
+        // Connect real-time updates
+        connectChartWs(symbol, interval);
+
+    } catch (e) {
+        console.error('Error loading chart data:', e);
+    }
+}
+
+function calcEMAArray(data, period) {
+    const result = [];
+    const k = 2 / (period + 1);
+    let ema = null;
+    for (let i = 0; i < data.length; i++) {
+        if (i < period - 1) { result.push(null); continue; }
+        if (ema === null) {
+            ema = data.slice(0, period).reduce((a, b) => a + b, 0) / period;
+        } else {
+            ema = data[i] * k + ema * (1 - k);
+        }
+        result.push(parseFloat(ema.toFixed(8)));
+    }
+    return result;
+}
+
+function connectChartWs(symbol, interval) {
+    if (chartWs) chartWs.close();
+    const url = `${BINANCE_WS_BASE}/${symbol}@kline_${interval}`;
+    chartWs = new WebSocket(url);
+    chartWs.onmessage = (e) => {
+        try {
+            const msg = JSON.parse(e.data);
+            if (msg.e === 'kline') {
+                const k = msg.k;
+                const candle = {
+                    time: Math.floor(k.t / 1000),
+                    open: parseFloat(k.o),
+                    high: parseFloat(k.h),
+                    low: parseFloat(k.l),
+                    close: parseFloat(k.c),
+                };
+                if (tvCandleSeries) tvCandleSeries.update(candle);
+                if (tvVolumeSeries) tvVolumeSeries.update({
+                    time: candle.time,
+                    value: parseFloat(k.v),
+                    color: candle.close >= candle.open ? 'rgba(0,255,65,0.2)' : 'rgba(255,59,59,0.2)',
+                });
+            }
+        } catch (err) {}
+    };
+}
+
+function changeChartSymbol() { if (tvChart) loadChartData(); }
+function changeChartInterval() { if (tvChart) loadChartData(); }
+
+function applyChartMarkers() {
+    if (!tvCandleSeries || chartSignalMarkers.length === 0) return;
+    tvCandleSeries.setMarkers(chartSignalMarkers.sort((a, b) => a.time - b.time));
+}
+
+// ==================== TRACK RECORD ====================
+let trackRecord = JSON.parse(localStorage.getItem('alphaTrackRecord') || '[]');
+
+function addSignalToTrackRecord(signal) {
+    const entry = {
+        id: signal.id,
+        symbol: signal.symbol,
+        direction: signal.direction,
+        price: signal.price,
+        strength: signal.strength.value,
+        riskLevel: signal.riskLevel,
+        rsi: signal.rsi,
+        timestamp: signal.timestamp,
+        verified: false,
+        result: null,
+        priceAfter: null,
+    };
+    trackRecord.unshift(entry);
+    localStorage.setItem('alphaTrackRecord', JSON.stringify(trackRecord));
+
+    // Schedule verification after 5 minutes
+    setTimeout(() => verifySignal(entry.id), 5 * 60 * 1000);
+
+    // Add marker to chart
+    chartSignalMarkers.push({
+        time: Math.floor(signal.timestamp / 1000),
+        position: signal.direction === 'BUY' ? 'belowBar' : 'aboveBar',
+        color: signal.direction === 'BUY' ? '#00ff41' : '#ff3b3b',
+        shape: signal.direction === 'BUY' ? 'arrowUp' : 'arrowDown',
+        text: `${signal.direction} ${signal.strength.value}%`,
+    });
+    applyChartMarkers();
+}
+
+async function verifySignal(signalId) {
+    const entry = trackRecord.find(t => t.id === signalId);
+    if (!entry || entry.verified) return;
+
+    try {
+        const resp = await fetch(`${BINANCE_API}/ticker/price?symbol=${entry.symbol.toUpperCase()}`);
+        const data = await resp.json();
+        const currentPrice = parseFloat(data.price);
+
+        entry.priceAfter = currentPrice;
+        entry.verified = true;
+
+        if (entry.direction === 'BUY') {
+            entry.result = currentPrice > entry.price ? 'win' : 'loss';
+        } else {
+            entry.result = currentPrice < entry.price ? 'win' : 'loss';
+        }
+
+        entry.changePercent = ((currentPrice - entry.price) / entry.price * 100).toFixed(2);
+
+        localStorage.setItem('alphaTrackRecord', JSON.stringify(trackRecord));
+        renderTrackRecord();
+        showToast(`📊 Señal verificada: ${entry.symbol} → ${entry.result === 'win' ? '✅ Acierto' : '❌ Fallo'}`, entry.result === 'win' ? 'success' : 'error');
+    } catch (e) {
+        console.error('Error verifying signal:', e);
+    }
+}
+
+function renderTrackRecord() {
+    const verified = trackRecord.filter(t => t.verified);
+    const wins = verified.filter(t => t.result === 'win').length;
+    const losses = verified.filter(t => t.result === 'loss').length;
+    const total = verified.length;
+    const winRate = total > 0 ? ((wins / total) * 100).toFixed(1) : '--';
+
+    // Calculate streak
+    let streak = 0;
+    let streakType = '';
+    for (const t of verified) {
+        if (!streakType) { streakType = t.result; streak = 1; }
+        else if (t.result === streakType) streak++;
+        else break;
+    }
+
+    document.getElementById('trTotalSignals').textContent = trackRecord.length;
+    document.getElementById('trWins').textContent = wins;
+    document.getElementById('trLosses').textContent = losses;
+    document.getElementById('trWinRate').textContent = winRate + '%';
+    document.getElementById('trStreak').textContent = (streakType === 'win' ? '+' : '-') + streak;
+
+    // Render performance chart
+    renderPerformanceChart(verified);
+
+    // Render table
+    const table = document.getElementById('trackRecordTable');
+    if (trackRecord.length === 0) {
+        table.innerHTML = '<p class="text-gray-600 text-xs text-center py-8"><i class="fas fa-clock text-2xl mb-2 block"></i>Las señales aparecerán aquí con su resultado verificado</p>';
+        return;
+    }
+
+    table.innerHTML = trackRecord.slice(0, 50).map(t => {
+        const time = new Date(t.timestamp).toLocaleString('es-CO', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        const isBuy = t.direction === 'BUY';
+        let resultBadge = '<span class="text-[10px] text-gray-600 px-2 py-0.5 rounded-full bg-gray-800">⏳ Pendiente</span>';
+        if (t.verified) {
+            resultBadge = t.result === 'win'
+                ? `<span class="text-[10px] text-[#00ff41] px-2 py-0.5 rounded-full bg-[#00ff41]/10">✅ +${Math.abs(t.changePercent)}%</span>`
+                : `<span class="text-[10px] text-red-400 px-2 py-0.5 rounded-full bg-red-500/10">❌ ${t.changePercent}%</span>`;
+        }
+        return `
+            <div class="tr-row flex items-center justify-between py-2.5 px-3 rounded-lg bg-gray-800/20 border border-gray-800/30">
+                <div class="flex items-center gap-3">
+                    <span class="px-2 py-0.5 rounded text-[10px] font-bold ${isBuy ? 'bg-[#00ff41]/15 text-[#00ff41]' : 'bg-red-500/15 text-red-400'}">${t.direction}</span>
+                    <span class="text-white text-xs font-medium">${t.symbol}</span>
+                    <span class="text-gray-500 text-[10px] font-mono">${formatPrice(t.price)}</span>
+                </div>
+                <div class="flex items-center gap-3">
+                    ${resultBadge}
+                    <span class="text-gray-600 text-[10px]">${time}</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderPerformanceChart(verified) {
+    const container = document.getElementById('performanceChart');
+    if (!container || typeof LightweightCharts === 'undefined' || verified.length === 0) return;
+
+    container.innerHTML = '';
+    const perfChart = LightweightCharts.createChart(container, {
+        layout: { background: { color: '#0a0a0f' }, textColor: '#6b7280', fontSize: 10 },
+        grid: { vertLines: { color: 'rgba(255,255,255,0.02)' }, horzLines: { color: 'rgba(255,255,255,0.02)' } },
+        rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)' },
+        timeScale: { borderColor: 'rgba(255,255,255,0.1)', timeVisible: true },
+        handleScroll: { vertTouchDrag: false },
+    });
+
+    let cumulative = 0;
+    const lineData = verified.reverse().map(t => {
+        cumulative += t.result === 'win' ? 1 : -1;
+        return { time: Math.floor(t.timestamp / 1000), value: cumulative };
+    });
+
+    const lineSeries = perfChart.addLineSeries({
+        color: cumulative >= 0 ? '#00ff41' : '#ff3b3b',
+        lineWidth: 2,
+    });
+    lineSeries.setData(lineData);
+
+    // Zero line
+    const zeroLine = perfChart.addLineSeries({ color: 'rgba(255,255,255,0.1)', lineWidth: 1, lineStyle: 2 });
+    if (lineData.length >= 2) {
+        zeroLine.setData([
+            { time: lineData[0].time, value: 0 },
+            { time: lineData[lineData.length - 1].time, value: 0 },
+        ]);
+    }
+
+    perfChart.timeScale().fitContent();
+    const ro = new ResizeObserver(() => perfChart.applyOptions({ width: container.clientWidth }));
+    ro.observe(container);
+}
+
+function clearTrackRecord() {
+    if (confirm('¿Seguro que quieres borrar todo el historial de señales?')) {
+        trackRecord = [];
+        chartSignalMarkers = [];
+        localStorage.removeItem('alphaTrackRecord');
+        renderTrackRecord();
+        showToast('Historial borrado', 'info');
+    }
+}
+
+// ==================== ACADEMIA ====================
+function completeLesson(num) {
+    const completed = JSON.parse(localStorage.getItem('alphaLessons') || '[]');
+    if (!completed.includes(num)) {
+        completed.push(num);
+        localStorage.setItem('alphaLessons', JSON.stringify(completed));
+        showToast(`🎓 ¡Lección ${num} completada!`, 'success');
+    }
+    loadAcademiaProgress();
+}
+
+function loadAcademiaProgress() {
+    const completed = JSON.parse(localStorage.getItem('alphaLessons') || '[]');
+    const total = 6;
+
+    document.getElementById('academiaProgress').textContent = `${completed.length}/${total} lecciones`;
+    document.getElementById('academiaProgressBar').style.width = `${(completed.length / total) * 100}%`;
+
+    for (let i = 1; i <= total; i++) {
+        const badge = document.getElementById(`lesson${i}-badge`);
+        const card = document.querySelector(`.lesson-card[data-lesson="${i}"]`);
+        if (completed.includes(i)) {
+            if (badge) badge.classList.remove('hidden');
+            if (card) card.classList.add('completed');
+        } else {
+            if (badge) badge.classList.add('hidden');
+            if (card) card.classList.remove('completed');
+        }
+    }
+
+    if (completed.length === total) {
+        showToast('🏆 ¡Felicidades! Has completado toda la Academia de Trading', 'success');
+    }
+}
+
+// ==================== TELEGRAM INTEGRATION ====================
+function saveTelegramConfig() {
+    const token = document.getElementById('telegramBotToken').value.trim();
+    const chatId = document.getElementById('telegramChatId').value.trim();
+
+    if (!token || !chatId) {
+        showToast('Ingresa el Bot Token y Chat ID', 'warning');
+        return;
+    }
+
+    localStorage.setItem('alphaTelegramToken', token);
+    localStorage.setItem('alphaTelegramChatId', chatId);
+
+    // Test connection
+    testTelegramConnection(token, chatId);
+}
+
+async function testTelegramConnection(token, chatId) {
+    try {
+        const msg = '✅ *AlphaSignal Pro* conectado correctamente\\!\n\nRecibirás señales de trading aquí\\.';
+        const resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: 'MarkdownV2' }),
+        });
+        const data = await resp.json();
+        if (data.ok) {
+            showToast('✅ Telegram conectado correctamente. Revisa tu chat!', 'success');
+        } else {
+            showToast('❌ Error: ' + (data.description || 'Token o Chat ID inválido'), 'error');
+        }
+    } catch (e) {
+        showToast('❌ Error de conexión con Telegram', 'error');
+    }
+}
+
+async function sendTelegramSignal(signal) {
+    const token = localStorage.getItem('alphaTelegramToken');
+    const chatId = localStorage.getItem('alphaTelegramChatId');
+    if (!token || !chatId) return;
+
+    const emoji = signal.direction === 'BUY' ? '🟢' : '🔴';
+    const risk = signal.riskLevel === 'green' ? '🟢 Seguro' : signal.riskLevel === 'yellow' ? '🟡 Precaución' : '🔴 Peligro';
+
+    const text = `${emoji} *SEÑAL ${signal.direction}*\n\n` +
+        `Moneda: *${signal.symbol}*\n` +
+        `Precio: \`${formatPrice(signal.price)}\`\n` +
+        `Fuerza: ${signal.strength.value}%\n` +
+        `Riesgo: ${risk}\n` +
+        `RSI: ${signal.rsi}\n\n` +
+        `⏱️ Válida por 2 minutos\n` +
+        `🤖 _AlphaSignal Pro_`;
+
+    try {
+        await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' }),
+        });
+    } catch (e) {
+        console.error('Telegram send error:', e);
+    }
+}
+
+// ==================== GEMINI AI INTEGRATION ====================
+function saveGeminiConfig() {
+    const key = document.getElementById('geminiApiKey').value.trim();
+    if (!key) { showToast('Ingresa tu API Key de Gemini', 'warning'); return; }
+    localStorage.setItem('alphaGeminiKey', key);
+    showToast('🤖 Gemini AI activado. Las señales serán validadas con IA.', 'success');
+}
+
+async function validateSignalWithGemini(signal) {
+    const key = localStorage.getItem('alphaGeminiKey');
+    if (!key) return null;
+
+    const prompt = `Eres un analista de trading experto. Analiza esta señal de trading y responde en español con máximo 2 oraciones simples:
+
+Señal: ${signal.direction} ${signal.symbol}
+Precio: ${signal.price}
+RSI: ${signal.rsi}
+Fuerza: ${signal.strength.value}%
+Riesgo: ${signal.riskLevel}
+
+¿Es una buena señal? ¿Qué debería tener en cuenta el trader?`;
+
+    try {
+        const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+        });
+        const data = await resp.json();
+        return data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
+    } catch (e) {
+        console.error('Gemini error:', e);
+        return null;
+    }
+}
+
+// ==================== CONFIG ====================
+function loadConfigValues() {
+    const tgToken = localStorage.getItem('alphaTelegramToken') || '';
+    const tgChat = localStorage.getItem('alphaTelegramChatId') || '';
+    const geminiKey = localStorage.getItem('alphaGeminiKey') || '';
+
+    document.getElementById('telegramBotToken').value = tgToken;
+    document.getElementById('telegramChatId').value = tgChat;
+    document.getElementById('geminiApiKey').value = geminiKey;
+}
+
+let alertSoundEnabled = true;
+function toggleAlertSound() {
+    alertSoundEnabled = !alertSoundEnabled;
+    const btn = document.getElementById('soundToggle');
+    if (alertSoundEnabled) {
+        btn.textContent = 'Activado';
+        btn.className = 'px-3 py-1.5 text-[10px] rounded-lg bg-[#00ff41]/20 text-[#00ff41]';
+    } else {
+        btn.textContent = 'Desactivado';
+        btn.className = 'px-3 py-1.5 text-[10px] rounded-lg bg-gray-600/20 text-gray-500';
+    }
+}
+
+function requestPushPermission() {
+    if ('Notification' in window) {
+        Notification.requestPermission().then(p => {
+            if (p === 'granted') {
+                document.getElementById('pushToggle').textContent = 'Activado ✓';
+                document.getElementById('pushToggle').className = 'px-3 py-1.5 text-[10px] rounded-lg bg-[#00ff41]/20 text-[#00ff41]';
+                showToast('🔔 Notificaciones Push activadas', 'success');
+            } else {
+                showToast('Notificaciones denegadas por el navegador', 'warning');
+            }
+        });
+    }
+}
+
+// ==================== PWA INSTALL ====================
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    const btn = document.getElementById('pwaInstallBtn');
+    if (btn) btn.classList.remove('hidden');
+});
+
+document.getElementById('pwaInstallBtn')?.addEventListener('click', async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const result = await deferredPrompt.userChoice;
+    if (result.outcome === 'accepted') {
+        showToast('📱 ¡App instalada en tu dispositivo!', 'success');
+    }
+    deferredPrompt = null;
+    document.getElementById('pwaInstallBtn').classList.add('hidden');
+});
+
+// Register Service Worker for PWA
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('firebase-messaging-sw.js').then(() => {
+        console.log('📱 Service Worker registrado para PWA');
+    }).catch(e => console.log('SW registration failed:', e));
+}
+
+// ==================== ENHANCED SIGNAL HANDLER ====================
+// Override handleNewSignal to include track record, telegram, and Gemini
+const _originalHandleNewSignal = handleNewSignal;
+handleNewSignal = async function(signal) {
+    _originalHandleNewSignal(signal);
+
+    // Add to track record
+    addSignalToTrackRecord(signal);
+
+    // Send to Telegram
+    sendTelegramSignal(signal);
+
+    // Validate with Gemini AI
+    const geminiResult = await validateSignalWithGemini(signal);
+    if (geminiResult) {
+        // Append AI analysis to the signal card
+        const card = document.getElementById(`signal-${signal.id}`);
+        if (card) {
+            const aiDiv = document.createElement('div');
+            aiDiv.className = 'mt-2 pt-2 border-t border-purple-800/30';
+            aiDiv.innerHTML = `
+                <p class="text-[10px] text-purple-400 mb-1"><i class="fas fa-robot mr-1"></i>Análisis Gemini AI:</p>
+                <p class="text-[11px] text-gray-400 leading-relaxed">${geminiResult}</p>
+            `;
+            card.appendChild(aiDiv);
+        }
+        showToast('🤖 Gemini AI ha validado la señal', 'info');
+    }
+};
+
 console.log(`
 ╔══════════════════════════════════════════╗
-║     ⚡ AlphaSignal Pro v1.0             ║
-║     Frontend Loaded Successfully        ║
+║     ⚡ AlphaSignal Pro v2.0             ║
+║     Full Suite Loaded Successfully      ║
+║     Chart + Track Record + Academia     ║
+║     Telegram + Gemini AI + PWA          ║
 ╚══════════════════════════════════════════╝
 `);

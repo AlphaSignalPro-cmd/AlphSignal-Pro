@@ -4,11 +4,21 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AlphaSignal Pro | Trading Algorítmico</title>
+    <!-- PWA -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#00ff41">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="AlphaSignal">
+    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect width='180' height='180' rx='40' fill='%230a0a0f'/><text x='90' y='118' text-anchor='middle' font-size='100' fill='%2300ff41'>⚡</text></svg>">
+    <!-- Styles & Fonts -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/@lottiefiles/lottie-player@2.0.8/dist/lottie-player.js"></script>
+    <!-- TradingView Lightweight Charts -->
+    <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
     <link rel="stylesheet" href="css/styles.css">
 </head>
 <body class="bg-[#0a0a0f] text-white min-h-screen font-['Inter']">
@@ -102,8 +112,38 @@
             </div>
         </header>
 
+        <!-- Navigation Tabs -->
+        <div class="bg-[#0a0a0f]/80 border-b border-gray-800/30 sticky top-[60px] z-40 backdrop-blur-xl">
+            <div class="max-w-[1920px] mx-auto px-4">
+                <div class="flex items-center gap-1 overflow-x-auto no-scrollbar py-1">
+                    <button onclick="switchTab('dashboard')" id="tab-dashboard" class="tab-btn active px-4 py-2 text-xs font-medium rounded-lg transition whitespace-nowrap flex items-center gap-1.5">
+                        <i class="fas fa-th-large"></i> Dashboard
+                    </button>
+                    <button onclick="switchTab('chart')" id="tab-chart" class="tab-btn px-4 py-2 text-xs font-medium rounded-lg transition whitespace-nowrap flex items-center gap-1.5">
+                        <i class="fas fa-chart-area"></i> Gráfico
+                    </button>
+                    <button onclick="switchTab('trackrecord')" id="tab-trackrecord" class="tab-btn px-4 py-2 text-xs font-medium rounded-lg transition whitespace-nowrap flex items-center gap-1.5">
+                        <i class="fas fa-trophy"></i> Track Record
+                    </button>
+                    <button onclick="switchTab('academia')" id="tab-academia" class="tab-btn px-4 py-2 text-xs font-medium rounded-lg transition whitespace-nowrap flex items-center gap-1.5">
+                        <i class="fas fa-graduation-cap"></i> Academia
+                    </button>
+                    <button onclick="switchTab('config')" id="tab-config" class="tab-btn px-4 py-2 text-xs font-medium rounded-lg transition whitespace-nowrap flex items-center gap-1.5">
+                        <i class="fas fa-cog"></i> Config
+                    </button>
+                    <!-- PWA Install Button -->
+                    <button id="pwaInstallBtn" class="hidden ml-auto px-4 py-2 text-xs font-bold rounded-lg bg-[#00ff41]/10 text-[#00ff41] border border-[#00ff41]/30 hover:bg-[#00ff41]/20 transition whitespace-nowrap flex items-center gap-1.5">
+                        <i class="fas fa-download"></i> Instalar App
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <!-- Main Content -->
         <main class="max-w-[1920px] mx-auto px-4 py-4 space-y-4">
+
+            <!-- ==================== VIEW: DASHBOARD ==================== -->
+            <div id="view-dashboard">
 
             <!-- Stats Bar -->
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -272,6 +312,427 @@
                     </div>
                 </div>
             </div>
+
+            </div><!-- end view-dashboard -->
+
+            <!-- ==================== VIEW: CHART ==================== -->
+            <div id="view-chart" class="hidden space-y-4">
+                <div class="glass-card rounded-xl p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <h2 class="text-sm font-semibold text-gray-300 flex items-center gap-2">
+                            <i class="fas fa-chart-area text-[#00ff41]"></i>
+                            Gráfico de Velas en Tiempo Real
+                        </h2>
+                        <div class="flex items-center gap-2">
+                            <select id="chartSymbol" onchange="changeChartSymbol()" class="bg-[#1a1a2e] border border-gray-700/50 text-white text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#00ff41]/50">
+                                <option value="btcusdt">BTC/USDT</option>
+                                <option value="ethusdt">ETH/USDT</option>
+                                <option value="bnbusdt">BNB/USDT</option>
+                                <option value="solusdt">SOL/USDT</option>
+                                <option value="xrpusdt">XRP/USDT</option>
+                                <option value="dogeusdt">DOGE/USDT</option>
+                                <option value="adausdt">ADA/USDT</option>
+                                <option value="avaxusdt">AVAX/USDT</option>
+                            </select>
+                            <select id="chartInterval" onchange="changeChartInterval()" class="bg-[#1a1a2e] border border-gray-700/50 text-white text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#00ff41]/50">
+                                <option value="1m">1 Min</option>
+                                <option value="5m">5 Min</option>
+                                <option value="15m" selected>15 Min</option>
+                                <option value="1h">1 Hora</option>
+                                <option value="4h">4 Horas</option>
+                                <option value="1d">1 Día</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="tvChartContainer" class="rounded-lg overflow-hidden" style="height: 500px; background: #0a0a0f;"></div>
+                    <div class="flex items-center gap-4 mt-3 text-[10px] text-gray-600">
+                        <span><span class="inline-block w-2 h-2 rounded-full bg-[#00ff41] mr-1"></span>EMA 9</span>
+                        <span><span class="inline-block w-2 h-2 rounded-full bg-[#ff6d00] mr-1"></span>EMA 21</span>
+                        <span><span class="inline-block w-2 h-2 rounded-full bg-blue-500 mr-1"></span>RSI</span>
+                        <span class="ml-auto">Fuente: Binance</span>
+                    </div>
+                </div>
+                <!-- Signal markers legend -->
+                <div class="glass-card rounded-xl p-4">
+                    <h3 class="text-xs font-semibold text-gray-400 mb-2">Marcadores en el gráfico</h3>
+                    <div class="flex flex-wrap gap-3 text-[11px]">
+                        <span class="flex items-center gap-1"><span class="text-[#00ff41]">▲</span> Señal BUY detectada</span>
+                        <span class="flex items-center gap-1"><span class="text-red-400">▼</span> Señal SELL detectada</span>
+                        <span class="flex items-center gap-1"><span class="text-gray-500">---</span> Soporte/Resistencia</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================== VIEW: TRACK RECORD ==================== -->
+            <div id="view-trackrecord" class="hidden space-y-4">
+                <!-- Performance Summary -->
+                <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                    <div class="glass-card rounded-xl p-4 text-center">
+                        <p class="text-gray-500 text-[10px] uppercase mb-1">Total Señales</p>
+                        <p id="trTotalSignals" class="text-2xl font-bold text-white font-mono">0</p>
+                    </div>
+                    <div class="glass-card rounded-xl p-4 text-center">
+                        <p class="text-gray-500 text-[10px] uppercase mb-1">Aciertos</p>
+                        <p id="trWins" class="text-2xl font-bold text-[#00ff41] font-mono">0</p>
+                    </div>
+                    <div class="glass-card rounded-xl p-4 text-center">
+                        <p class="text-gray-500 text-[10px] uppercase mb-1">Fallos</p>
+                        <p id="trLosses" class="text-2xl font-bold text-red-400 font-mono">0</p>
+                    </div>
+                    <div class="glass-card rounded-xl p-4 text-center">
+                        <p class="text-gray-500 text-[10px] uppercase mb-1">Win Rate</p>
+                        <p id="trWinRate" class="text-2xl font-bold text-amber-400 font-mono">--%</p>
+                    </div>
+                    <div class="glass-card rounded-xl p-4 text-center">
+                        <p class="text-gray-500 text-[10px] uppercase mb-1">Racha Actual</p>
+                        <p id="trStreak" class="text-2xl font-bold text-purple-400 font-mono">0</p>
+                    </div>
+                </div>
+
+                <!-- Backtesting Visual -->
+                <div class="glass-card rounded-xl p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <h2 class="text-sm font-semibold text-gray-300 flex items-center gap-2">
+                            <i class="fas fa-chart-line text-[#00ff41]"></i>
+                            Rendimiento de Señales
+                            <span class="tooltip-trigger relative cursor-help">
+                                <i class="fas fa-info-circle text-gray-600 text-xs"></i>
+                                <span class="tooltip-text">Cada señal se verifica 5 minutos después. Si el precio se movió en la dirección predicha, es un acierto ✅</span>
+                            </span>
+                        </h2>
+                        <span class="text-[10px] text-gray-600 font-mono">Verificación: 5 min post-señal</span>
+                    </div>
+                    <div id="performanceChart" class="rounded-lg" style="height: 250px; background: #0a0a0f;"></div>
+                </div>
+
+                <!-- Signal History Table -->
+                <div class="glass-card rounded-xl p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <h2 class="text-sm font-semibold text-gray-300 flex items-center gap-2">
+                            <i class="fas fa-list-alt text-purple-400"></i>
+                            Historial Detallado de Señales
+                        </h2>
+                        <button onclick="clearTrackRecord()" class="text-[10px] text-gray-600 hover:text-red-400 transition">
+                            <i class="fas fa-trash-alt mr-1"></i>Limpiar
+                        </button>
+                    </div>
+                    <div id="trackRecordTable" class="space-y-2 max-h-[50vh] overflow-y-auto custom-scrollbar">
+                        <p class="text-gray-600 text-xs text-center py-8">
+                            <i class="fas fa-clock text-2xl mb-2 block"></i>
+                            Las señales aparecerán aquí con su resultado verificado
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================== VIEW: ACADEMIA ==================== -->
+            <div id="view-academia" class="hidden space-y-4">
+                <!-- Progress -->
+                <div class="glass-card rounded-xl p-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <h2 class="text-sm font-semibold text-gray-300 flex items-center gap-2">
+                            <i class="fas fa-graduation-cap text-amber-400"></i>
+                            Tu Progreso de Aprendizaje
+                        </h2>
+                        <span id="academiaProgress" class="text-xs text-[#00ff41] font-mono">0/6 lecciones</span>
+                    </div>
+                    <div class="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
+                        <div id="academiaProgressBar" class="h-full bg-gradient-to-r from-[#00ff41] to-emerald-400 rounded-full transition-all duration-500" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <!-- Lessons Grid -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                    <!-- Lesson 1 -->
+                    <div class="glass-card rounded-xl overflow-hidden lesson-card" data-lesson="1">
+                        <div class="p-4 border-b border-gray-800/50">
+                            <div class="flex items-center gap-3">
+                                <div class="w-12 h-12 rounded-xl bg-blue-600/20 flex items-center justify-center text-2xl">🌱</div>
+                                <div class="flex-1">
+                                    <div class="flex items-center gap-2">
+                                        <span class="px-2 py-0.5 rounded-full text-[10px] bg-blue-500/20 text-blue-400">Nivel 1</span>
+                                        <span id="lesson1-badge" class="hidden px-2 py-0.5 rounded-full text-[10px] bg-[#00ff41]/20 text-[#00ff41]">✓ Completada</span>
+                                    </div>
+                                    <p class="text-white font-semibold text-sm mt-1">¿Qué es el Trading?</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="p-4 space-y-3">
+                            <p class="text-gray-400 text-xs leading-relaxed">Imagina que vas a un mercado de frutas 🍎. Compras manzanas baratas por la mañana y las vendes más caras por la tarde. <strong class="text-white">Eso es trading</strong>: comprar barato y vender caro.</p>
+                            <p class="text-gray-400 text-xs leading-relaxed">En el trading de criptomonedas, en vez de frutas, compras y vendes <strong class="text-amber-400">monedas digitales</strong> como Bitcoin o Ethereum. Los precios cambian cada segundo, y tu objetivo es aprovechar esos movimientos.</p>
+                            <div class="bg-[#00ff41]/5 border border-[#00ff41]/10 rounded-lg p-3">
+                                <p class="text-[11px] text-gray-300">💡 <strong>Regla #1:</strong> Nunca inviertas dinero que no puedes perder. El trading es como apostar en un partido: puedes ganar o perder.</p>
+                            </div>
+                            <button onclick="completeLesson(1)" class="w-full py-2 text-xs font-medium rounded-lg bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 transition">
+                                <i class="fas fa-check mr-1"></i>Marcar como completada
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Lesson 2 -->
+                    <div class="glass-card rounded-xl overflow-hidden lesson-card" data-lesson="2">
+                        <div class="p-4 border-b border-gray-800/50">
+                            <div class="flex items-center gap-3">
+                                <div class="w-12 h-12 rounded-xl bg-purple-600/20 flex items-center justify-center text-2xl">📊</div>
+                                <div class="flex-1">
+                                    <div class="flex items-center gap-2">
+                                        <span class="px-2 py-0.5 rounded-full text-[10px] bg-purple-500/20 text-purple-400">Nivel 1</span>
+                                        <span id="lesson2-badge" class="hidden px-2 py-0.5 rounded-full text-[10px] bg-[#00ff41]/20 text-[#00ff41]">✓ Completada</span>
+                                    </div>
+                                    <p class="text-white font-semibold text-sm mt-1">Leyendo un Gráfico de Velas</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="p-4 space-y-3">
+                            <p class="text-gray-400 text-xs leading-relaxed">Las velas japonesas son como <strong class="text-purple-400">termómetros del precio</strong> 🌡️. Cada vela te dice 4 cosas: precio de apertura, cierre, máximo y mínimo.</p>
+                            <div class="flex items-center justify-center gap-8 py-2">
+                                <div class="text-center">
+                                    <div class="w-8 h-20 bg-[#00ff41]/30 border border-[#00ff41] rounded relative mx-auto">
+                                        <div class="absolute -top-3 left-1/2 w-0.5 h-3 bg-[#00ff41] -translate-x-1/2"></div>
+                                        <div class="absolute -bottom-3 left-1/2 w-0.5 h-3 bg-[#00ff41] -translate-x-1/2"></div>
+                                    </div>
+                                    <p class="text-[10px] text-[#00ff41] mt-2 font-bold">Alcista</p>
+                                    <p class="text-[9px] text-gray-500">Subió de precio</p>
+                                </div>
+                                <div class="text-center">
+                                    <div class="w-8 h-20 bg-red-500/30 border border-red-500 rounded relative mx-auto">
+                                        <div class="absolute -top-3 left-1/2 w-0.5 h-3 bg-red-500 -translate-x-1/2"></div>
+                                        <div class="absolute -bottom-3 left-1/2 w-0.5 h-3 bg-red-500 -translate-x-1/2"></div>
+                                    </div>
+                                    <p class="text-[10px] text-red-400 mt-2 font-bold">Bajista</p>
+                                    <p class="text-[9px] text-gray-500">Bajó de precio</p>
+                                </div>
+                            </div>
+                            <p class="text-gray-400 text-xs leading-relaxed">🟢 <strong>Verde</strong> = el precio subió durante ese período. 🔴 <strong>Rojo</strong> = bajó. Las "mechas" (palitos arriba/abajo) muestran cuánto fluctuó.</p>
+                            <button onclick="completeLesson(2)" class="w-full py-2 text-xs font-medium rounded-lg bg-purple-600/20 text-purple-400 hover:bg-purple-600/30 transition">
+                                <i class="fas fa-check mr-1"></i>Marcar como completada
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Lesson 3 -->
+                    <div class="glass-card rounded-xl overflow-hidden lesson-card" data-lesson="3">
+                        <div class="p-4 border-b border-gray-800/50">
+                            <div class="flex items-center gap-3">
+                                <div class="w-12 h-12 rounded-xl bg-amber-600/20 flex items-center justify-center text-2xl">🔧</div>
+                                <div class="flex-1">
+                                    <div class="flex items-center gap-2">
+                                        <span class="px-2 py-0.5 rounded-full text-[10px] bg-amber-500/20 text-amber-400">Nivel 2</span>
+                                        <span id="lesson3-badge" class="hidden px-2 py-0.5 rounded-full text-[10px] bg-[#00ff41]/20 text-[#00ff41]">✓ Completada</span>
+                                    </div>
+                                    <p class="text-white font-semibold text-sm mt-1">RSI: El Termómetro del Mercado</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="p-4 space-y-3">
+                            <p class="text-gray-400 text-xs leading-relaxed">El RSI es un número del 0 al 100 que mide si algo está "<strong class="text-red-400">caro</strong>" o "<strong class="text-[#00ff41]">barato</strong>".</p>
+                            <div class="bg-[#1a1a2e] rounded-lg p-3 space-y-2">
+                                <div class="flex items-center gap-2"><div class="w-full bg-gray-800 rounded-full h-3"><div class="bg-red-500 h-3 rounded-full" style="width:100%"></div></div><span class="text-[10px] text-red-400 w-20">70-100 🔥</span></div>
+                                <div class="flex items-center gap-2"><div class="w-full bg-gray-800 rounded-full h-3"><div class="bg-gray-500 h-3 rounded-full" style="width:65%"></div></div><span class="text-[10px] text-gray-400 w-20">30-70 😐</span></div>
+                                <div class="flex items-center gap-2"><div class="w-full bg-gray-800 rounded-full h-3"><div class="bg-[#00ff41] h-3 rounded-full" style="width:30%"></div></div><span class="text-[10px] text-[#00ff41] w-20">0-30 💰</span></div>
+                            </div>
+                            <p class="text-gray-400 text-xs">Arriba de 70 = <strong class="text-red-400">sobrecomprado</strong> (el precio subió demasiado, puede bajar). Debajo de 30 = <strong class="text-[#00ff41]">sobrevendido</strong> (bajó mucho, puede subir).</p>
+                            <button onclick="completeLesson(3)" class="w-full py-2 text-xs font-medium rounded-lg bg-amber-600/20 text-amber-400 hover:bg-amber-600/30 transition">
+                                <i class="fas fa-check mr-1"></i>Marcar como completada
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Lesson 4 -->
+                    <div class="glass-card rounded-xl overflow-hidden lesson-card" data-lesson="4">
+                        <div class="p-4 border-b border-gray-800/50">
+                            <div class="flex items-center gap-3">
+                                <div class="w-12 h-12 rounded-xl bg-cyan-600/20 flex items-center justify-center text-2xl">🏞️</div>
+                                <div class="flex-1">
+                                    <div class="flex items-center gap-2">
+                                        <span class="px-2 py-0.5 rounded-full text-[10px] bg-cyan-500/20 text-cyan-400">Nivel 2</span>
+                                        <span id="lesson4-badge" class="hidden px-2 py-0.5 rounded-full text-[10px] bg-[#00ff41]/20 text-[#00ff41]">✓ Completada</span>
+                                    </div>
+                                    <p class="text-white font-semibold text-sm mt-1">EMA: Las Corrientes del Río</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="p-4 space-y-3">
+                            <p class="text-gray-400 text-xs leading-relaxed">Las medias móviles (EMA) son como <strong class="text-cyan-400">corrientes de un río</strong>. Hay una corriente rápida (EMA 9) y una lenta (EMA 21).</p>
+                            <p class="text-gray-400 text-xs leading-relaxed">⬆️ Cuando la rápida <strong class="text-[#00ff41]">cruza por encima</strong> de la lenta = señal de compra ("Golden Cross").</p>
+                            <p class="text-gray-400 text-xs leading-relaxed">⬇️ Cuando la rápida <strong class="text-red-400">cruza por debajo</strong> de la lenta = señal de venta ("Death Cross").</p>
+                            <div class="bg-[#00ff41]/5 border border-[#00ff41]/10 rounded-lg p-3">
+                                <p class="text-[11px] text-gray-300">💡 <strong>Tip Pro:</strong> Las señales de EMA son más confiables cuando el volumen es alto. Si poca gente está comprando, el cruce puede ser falso.</p>
+                            </div>
+                            <button onclick="completeLesson(4)" class="w-full py-2 text-xs font-medium rounded-lg bg-cyan-600/20 text-cyan-400 hover:bg-cyan-600/30 transition">
+                                <i class="fas fa-check mr-1"></i>Marcar como completada
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Lesson 5 -->
+                    <div class="glass-card rounded-xl overflow-hidden lesson-card" data-lesson="5">
+                        <div class="p-4 border-b border-gray-800/50">
+                            <div class="flex items-center gap-3">
+                                <div class="w-12 h-12 rounded-xl bg-red-600/20 flex items-center justify-center text-2xl">🛡️</div>
+                                <div class="flex-1">
+                                    <div class="flex items-center gap-2">
+                                        <span class="px-2 py-0.5 rounded-full text-[10px] bg-red-500/20 text-red-400">Nivel 3</span>
+                                        <span id="lesson5-badge" class="hidden px-2 py-0.5 rounded-full text-[10px] bg-[#00ff41]/20 text-[#00ff41]">✓ Completada</span>
+                                    </div>
+                                    <p class="text-white font-semibold text-sm mt-1">Stop Loss: Tu Cinturón de Seguridad</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="p-4 space-y-3">
+                            <p class="text-gray-400 text-xs leading-relaxed">El Stop Loss es como un <strong class="text-red-400">cinturón de seguridad</strong> 🚗. No evita el accidente, pero te protege de las lesiones graves.</p>
+                            <p class="text-gray-400 text-xs leading-relaxed">Es una orden automática que dice: <em>"Si el precio baja hasta aquí, vende automáticamente para que no pierda más"</em>.</p>
+                            <div class="bg-red-500/5 border border-red-500/10 rounded-lg p-3">
+                                <p class="text-[11px] text-gray-300">🚨 <strong>REGLA DE ORO:</strong> Nunca arriesgues más del 1-2% de tu capital en un solo trade. Si tienes $100, tu máxima pérdida debe ser $1-$2 por trade.</p>
+                            </div>
+                            <button onclick="completeLesson(5)" class="w-full py-2 text-xs font-medium rounded-lg bg-red-600/20 text-red-400 hover:bg-red-600/30 transition">
+                                <i class="fas fa-check mr-1"></i>Marcar como completada
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Lesson 6 -->
+                    <div class="glass-card rounded-xl overflow-hidden lesson-card" data-lesson="6">
+                        <div class="p-4 border-b border-gray-800/50">
+                            <div class="flex items-center gap-3">
+                                <div class="w-12 h-12 rounded-xl bg-[#00ff41]/20 flex items-center justify-center text-2xl">🧠</div>
+                                <div class="flex-1">
+                                    <div class="flex items-center gap-2">
+                                        <span class="px-2 py-0.5 rounded-full text-[10px] bg-[#00ff41]/20 text-[#00ff41]">Nivel 3</span>
+                                        <span id="lesson6-badge" class="hidden px-2 py-0.5 rounded-full text-[10px] bg-[#00ff41]/20 text-[#00ff41]">✓ Completada</span>
+                                    </div>
+                                    <p class="text-white font-semibold text-sm mt-1">Psicología del Trader</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="p-4 space-y-3">
+                            <p class="text-gray-400 text-xs leading-relaxed">El <strong class="text-[#00ff41]">80% del trading es mental</strong>. Tus emociones son tu peor enemigo:</p>
+                            <div class="space-y-2">
+                                <div class="flex items-start gap-2 text-xs text-gray-400">
+                                    <span>😱</span><div><strong class="text-white">FOMO</strong> (Miedo a perdértelo): "¡Bitcoin subió! Tengo que comprar YA!" → Error clásico. Compras caro.</div>
+                                </div>
+                                <div class="flex items-start gap-2 text-xs text-gray-400">
+                                    <span>😤</span><div><strong class="text-white">Revenge Trading</strong>: Perdiste y quieres recuperar rápido → Haces trades impulsivos y pierdes más.</div>
+                                </div>
+                                <div class="flex items-start gap-2 text-xs text-gray-400">
+                                    <span>🤑</span><div><strong class="text-white">Avaricia</strong>: "Voy a esperar a que suba más" → El precio se da vuelta y pierdes las ganancias.</div>
+                                </div>
+                            </div>
+                            <div class="bg-[#00ff41]/5 border border-[#00ff41]/10 rounded-lg p-3">
+                                <p class="text-[11px] text-gray-300">🧘 <strong>Consejo:</strong> Sigue tu plan, respeta tu Stop Loss, y si perdiste, APAGA la pantalla. Mañana hay mercado de nuevo.</p>
+                            </div>
+                            <button onclick="completeLesson(6)" class="w-full py-2 text-xs font-medium rounded-lg bg-[#00ff41]/20 text-[#00ff41] hover:bg-[#00ff41]/30 transition">
+                                <i class="fas fa-check mr-1"></i>Marcar como completada
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================== VIEW: CONFIG ==================== -->
+            <div id="view-config" class="hidden space-y-4">
+                <!-- Telegram Bot -->
+                <div class="glass-card rounded-xl p-4">
+                    <h2 class="text-sm font-semibold text-gray-300 flex items-center gap-2 mb-4">
+                        <i class="fab fa-telegram text-blue-400"></i>
+                        Alertas por Telegram
+                    </h2>
+                    <div class="space-y-3">
+                        <p class="text-gray-400 text-xs leading-relaxed">Recibe señales directamente en tu Telegram. Configura tu bot personal:</p>
+                        <div class="space-y-2">
+                            <label class="text-[10px] text-gray-500 uppercase">Bot Token</label>
+                            <input type="text" id="telegramBotToken" placeholder="123456:ABC-DEF1234ghIkl..."
+                                class="w-full px-3 py-2.5 bg-[#1a1a2e]/80 border border-gray-700/50 rounded-lg text-white text-xs placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500/50">
+                        </div>
+                        <div class="space-y-2">
+                            <label class="text-[10px] text-gray-500 uppercase">Chat ID</label>
+                            <input type="text" id="telegramChatId" placeholder="Tu Chat ID numérico"
+                                class="w-full px-3 py-2.5 bg-[#1a1a2e]/80 border border-gray-700/50 rounded-lg text-white text-xs placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500/50">
+                        </div>
+                        <button onclick="saveTelegramConfig()" class="w-full py-2.5 text-xs font-medium rounded-lg bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 transition flex items-center justify-center gap-2">
+                            <i class="fab fa-telegram"></i> Guardar y Probar Conexión
+                        </button>
+                        <div class="bg-blue-500/5 border border-blue-500/10 rounded-lg p-3 space-y-1">
+                            <p class="text-[11px] text-gray-400"><strong class="text-blue-400">¿Cómo obtener un Bot?</strong></p>
+                            <p class="text-[10px] text-gray-500">1. Abre Telegram y busca <strong>@BotFather</strong></p>
+                            <p class="text-[10px] text-gray-500">2. Escribe <code class="bg-gray-800 px-1 rounded">/newbot</code> y sigue los pasos</p>
+                            <p class="text-[10px] text-gray-500">3. Copia el Token que te da</p>
+                            <p class="text-[10px] text-gray-500">4. Para el Chat ID, busca <strong>@userinfobot</strong> y te lo dará</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Gemini AI -->
+                <div class="glass-card rounded-xl p-4">
+                    <h2 class="text-sm font-semibold text-gray-300 flex items-center gap-2 mb-4">
+                        <i class="fas fa-robot text-purple-400"></i>
+                        Gemini AI - Validación Inteligente
+                        <span class="px-2 py-0.5 rounded-full text-[10px] bg-purple-500/20 text-purple-400">Beta</span>
+                    </h2>
+                    <div class="space-y-3">
+                        <p class="text-gray-400 text-xs leading-relaxed">Conecta Google Gemini AI para que valide cada señal con análisis de sentimiento y contexto de mercado.</p>
+                        <div class="space-y-2">
+                            <label class="text-[10px] text-gray-500 uppercase">Gemini API Key</label>
+                            <input type="password" id="geminiApiKey" placeholder="AIza..."
+                                class="w-full px-3 py-2.5 bg-[#1a1a2e]/80 border border-gray-700/50 rounded-lg text-white text-xs placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-purple-500/50">
+                        </div>
+                        <button onclick="saveGeminiConfig()" class="w-full py-2.5 text-xs font-medium rounded-lg bg-purple-600/20 text-purple-400 hover:bg-purple-600/30 transition flex items-center justify-center gap-2">
+                            <i class="fas fa-robot"></i> Activar Gemini AI
+                        </button>
+                        <div class="bg-purple-500/5 border border-purple-500/10 rounded-lg p-3">
+                            <p class="text-[11px] text-gray-400"><strong class="text-purple-400">¿Cómo obtener la API Key?</strong></p>
+                            <p class="text-[10px] text-gray-500">1. Ve a <strong>aistudio.google.com</strong></p>
+                            <p class="text-[10px] text-gray-500">2. Click en "Get API Key"</p>
+                            <p class="text-[10px] text-gray-500">3. Crea un proyecto y copia la key</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Notification Settings -->
+                <div class="glass-card rounded-xl p-4">
+                    <h2 class="text-sm font-semibold text-gray-300 flex items-center gap-2 mb-4">
+                        <i class="fas fa-bell text-amber-400"></i>
+                        Notificaciones
+                    </h2>
+                    <div class="space-y-3">
+                        <div class="flex items-center justify-between py-2">
+                            <div>
+                                <p class="text-white text-xs font-medium">Notificaciones Push</p>
+                                <p class="text-gray-600 text-[10px]">Recibir alertas cuando no estés en la app</p>
+                            </div>
+                            <button onclick="requestPushPermission()" id="pushToggle" class="px-3 py-1.5 text-[10px] rounded-lg bg-amber-600/20 text-amber-400 hover:bg-amber-600/30 transition">
+                                Activar
+                            </button>
+                        </div>
+                        <div class="flex items-center justify-between py-2">
+                            <div>
+                                <p class="text-white text-xs font-medium">Sonido de Alertas</p>
+                                <p class="text-gray-600 text-[10px]">Sonido al recibir señales en modo Presente</p>
+                            </div>
+                            <button onclick="toggleAlertSound()" id="soundToggle" class="px-3 py-1.5 text-[10px] rounded-lg bg-[#00ff41]/20 text-[#00ff41]">
+                                Activado
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- App Info -->
+                <div class="glass-card rounded-xl p-4">
+                    <h2 class="text-sm font-semibold text-gray-300 flex items-center gap-2 mb-3">
+                        <i class="fas fa-info-circle text-gray-500"></i>
+                        Acerca de AlphaSignal Pro
+                    </h2>
+                    <div class="space-y-2 text-xs text-gray-500">
+                        <p>Versión: <span class="text-white font-mono">2.0.0</span></p>
+                        <p>Motor: <span class="text-white">RSI + EMA + MACD + Volume</span></p>
+                        <p>Datos: <span class="text-white">Binance WebSocket (tiempo real)</span></p>
+                        <p>AI: <span class="text-purple-400">Gemini (opcional)</span></p>
+                        <p class="pt-2 border-t border-gray-800/50 text-gray-600">⚠️ Esta herramienta es solo para análisis educativo. No constituye consejo financiero.</p>
+                    </div>
+                </div>
+            </div>
+
         </main>
     </div>
 

@@ -364,6 +364,60 @@ body {
     animation: slideInRight 0.3s ease-out reverse;
 }
 
+/* ==================== NAVIGATION TABS ==================== */
+.tab-btn {
+    color: #6b7280;
+    background: transparent;
+}
+
+.tab-btn:hover {
+    color: #d1d5db;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.tab-btn.active {
+    color: var(--neon-green);
+    background: rgba(0, 255, 65, 0.08);
+    border: 1px solid rgba(0, 255, 65, 0.15);
+}
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ==================== LESSON CARDS ==================== */
+.lesson-card {
+    transition: all 0.3s ease;
+}
+
+.lesson-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+.lesson-card.completed {
+    opacity: 0.7;
+    border-color: rgba(0, 255, 65, 0.2);
+}
+
+.lesson-card.completed::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 255, 65, 0.02);
+    pointer-events: none;
+    border-radius: inherit;
+}
+
+/* ==================== TRACK RECORD ==================== */
+.tr-row {
+    animation: slideIn 0.3s ease-out;
+    transition: all 0.3s ease;
+}
+
+.tr-row:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
 /* ==================== RESPONSIVE ==================== */
 @media (max-width: 768px) {
     .glass-card {

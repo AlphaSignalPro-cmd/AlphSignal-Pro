@@ -1007,18 +1007,23 @@ function showSignalXmGuide(signal) {
     const price = signal.price;
 
     // Calculate TP and SL based on support/resistance and direction
+    // Ensure SL is always on the correct side of the entry price
+    const fallbackDist = price * 0.005; // 0.5% fallback distance
     let tp, sl, tpDistance, slDistance;
     if (isBuy) {
-        sl = signal.support;
-        tp = signal.resistance;
+        tp = signal.resistance > price ? signal.resistance : price + fallbackDist * 2;
+        sl = signal.support < price ? signal.support : price - fallbackDist;
         slDistance = price - sl;
         tpDistance = tp - price;
     } else {
-        sl = signal.resistance;
-        tp = signal.support;
+        tp = signal.support < price ? signal.support : price - fallbackDist * 2;
+        sl = signal.resistance > price ? signal.resistance : price + fallbackDist;
         slDistance = sl - price;
         tpDistance = price - tp;
     }
+    // Final safety: ensure distances are positive
+    if (slDistance <= 0) { sl = isBuy ? price - fallbackDist : price + fallbackDist; slDistance = fallbackDist; }
+    if (tpDistance <= 0) { tp = isBuy ? price + fallbackDist * 2 : price - fallbackDist * 2; tpDistance = fallbackDist * 2; }
 
     // Risk/Reward ratio
     const rr = slDistance > 0 ? (tpDistance / slDistance).toFixed(1) : '—';

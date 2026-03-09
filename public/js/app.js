@@ -976,10 +976,20 @@ async function loadAdminUsers() {
     try {
         const snap = await db.collection('users').get();
         allUsers = snap.docs.map(doc => ({ uid: doc.id, ...doc.data() }));
+        console.log('👑 Admin: ' + allUsers.length + ' usuarios encontrados');
         renderAdminUsers(allUsers);
     } catch (e) {
         console.error('Error loading users:', e);
-        container.innerHTML = '<p class="text-red-400 text-xs text-center py-4">Error al cargar usuarios</p>';
+        if (e.code === 'permission-denied') {
+            container.innerHTML = `
+                <div class="text-center py-6 space-y-3">
+                    <i class="fas fa-lock text-red-400 text-3xl"></i>
+                    <p class="text-red-400 text-xs font-bold">Permisos insuficientes</p>
+                    <p class="text-gray-500 text-[11px]">Debes actualizar las reglas de Firestore para permitir al admin leer todos los usuarios.<br>Ve a Firebase Console → Firestore → Rules</p>
+                </div>`;
+        } else {
+            container.innerHTML = '<p class="text-red-400 text-xs text-center py-4">Error al cargar usuarios: ' + e.message + '</p>';
+        }
     }
 }
 

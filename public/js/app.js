@@ -22,7 +22,7 @@ const db = firebase.firestore();
 const BINANCE_WS_BASE = 'wss://stream.binance.com:9443/ws';
 const BINANCE_API = 'https://api.binance.com/api/v3';
 const SYMBOLS = ['btcusdt', 'ethusdt', 'bnbusdt', 'solusdt', 'xrpusdt', 'dogeusdt', 'adausdt', 'avaxusdt'];
-const KLINE_INTERVAL = '1m';
+let KLINE_INTERVAL = '1m';
 const ADMIN_EMAIL = 'f1098749586@gmail.com';
 
 // ==================== STATE ====================
@@ -1149,7 +1149,7 @@ document.addEventListener('keydown', (e) => {
 
 // ==================== TAB NAVIGATION ====================
 function switchTab(tabName) {
-    const views = ['dashboard', 'chart', 'trackrecord', 'academia', 'config', 'admin'];
+    const views = ['dashboard', 'chart', 'trackrecord', 'academia', 'backtest', 'config', 'admin'];
     views.forEach(v => {
         const el = document.getElementById(`view-${v}`);
         const btn = document.getElementById(`tab-${v}`);
@@ -1161,7 +1161,7 @@ function switchTab(tabName) {
     if (tabName === 'chart' && !tvChart) initTradingViewChart();
     if (tabName === 'trackrecord') renderTrackRecord();
     if (tabName === 'academia') loadAcademiaProgress();
-    if (tabName === 'config') loadConfigValues();
+    if (tabName === 'config') { loadConfigValues(); updateTimeframeUI(); }
     if (tabName === 'admin' && isAdmin) loadAdminUsers();
 }
 
@@ -1931,11 +1931,356 @@ handleNewSignal = async function(signal) {
     }
 };
 
+// ==================== TIMEFRAME SWITCHING ====================
+function updateTimeframeUI() {
+    document.querySelectorAll('.timeframe-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tf === KLINE_INTERVAL);
+    });
+    const el = document.getElementById('currentTimeframe');
+    if (el) el.textContent = KLINE_INTERVAL;
+}
+
+function changeTimeframe(newInterval) {
+    if (newInterval === KLINE_INTERVAL) return;
+    KLINE_INTERVAL = newInterval;
+    updateTimeframeUI();
+    console.log(`⏱️ Temporalidad cambiada a ${newInterval}`);
+
+    // Reset signals and price history
+    signals = [];
+    todaySignalCount = 0;
+    SYMBOLS.forEach(s => { priceHistory[s] = []; });
+    renderSignals();
+    updateStats();
+
+    // Reconnect WebSocket with new interval
+    if (binanceWs) {
+        binanceWs.onclose = null;
+        binanceWs.close();
+    }
+    connectWebSocket();
+
+    showToast(`⏱️ Temporalidad cambiada a ${newInterval}`, 'info');
+    localStorage.setItem('alphasignal_timeframe', newInterval);
+}
+
+// Restore saved timeframe on load
+(function restoreTimeframe() {
+    const saved = localStorage.getItem('alphasignal_timeframe');
+    if (saved && ['1m', '5m', '15m', '1h'].includes(saved)) {
+        KLINE_INTERVAL = saved;
+    }
+})();
+
+// ==================== BACKTESTING ENGINE ====================
+let btRunning = false;
+
+async function fetchBacktestKlines(symbol, interval, limit) {
+    const resp = await fetch(`${BINANCE_API}/klines?symbol=${symbol.toUpperCase()}&interval=${interval}&limit=${limit}`);
+    const data = await resp.json();
+    return data.map(k => ({
+        time: k[0], open: parseFloat(k[1]), high: parseFloat(k[2]),
+        low: parseFloat(k[3]), close: parseFloat(k[4]), volume: parseFloat(k[5])
+    }));
+}
+
+function simulateTrade(signal, futureCandles) {
+    const isBuy = signal.direction === 'BUY';
+    const entry = signal.price;
+    const tp = isBuy ? signal.resistance : signal.support;
+    const sl = isBuy ? signal.support : signal.resistance;
+
+    for (const candle of futureCandles) {
+        if (isBuy) {
+            if (candle.low <= sl) return { result: 'sl', exitPrice: sl, pnl: sl - entry };
+            if (candle.high >= tp) return { result: 'tp', exitPrice: tp, pnl: tp - entry };
+        } else {
+            if (candle.high >= sl) return { result: 'sl', exitPrice: sl, pnl: entry - sl };
+            if (candle.low <= tp) return { result: 'tp', exitPrice: tp, pnl: entry - tp };
+        }
+    }
+    // Trade didn't close within the lookback period
+    const lastClose = futureCandles[futureCandles.length - 1]?.close || entry;
+    const openPnl = isBuy ? lastClose - entry : entry - lastClose;
+    return { result: 'open', exitPrice: lastClose, pnl: openPnl };
+}
+
+async function runBacktest() {
+    if (btRunning) return;
+    btRunning = true;
+
+    const pair = document.getElementById('btPair').value;
+    const interval = document.getElementById('btInterval').value;
+    const candles = parseInt(document.getElementById('btCandles').value);
+    const lots = parseFloat(document.getElementById('btLots').value);
+    const symbols = pair === 'all' ? SYMBOLS : [pair];
+
+    // Show progress, hide previous results
+    document.getElementById('btProgress').classList.remove('hidden');
+    document.getElementById('btStats').classList.add('hidden');
+    document.getElementById('btDetail').classList.add('hidden');
+    document.getElementById('btRunBtn').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Ejecutando...';
+
+    const engine = new SignalEngine();
+    const allTrades = [];
+    const pairStats = {};
+
+    try {
+        for (let si = 0; si < symbols.length; si++) {
+            const sym = symbols[si];
+            document.getElementById('btProgressText').textContent = `Analizando ${sym.toUpperCase()}... (${si + 1}/${symbols.length})`;
+            document.getElementById('btProgressBar').style.width = `${((si) / symbols.length) * 100}%`;
+
+            const klines = await fetchBacktestKlines(sym, interval, candles);
+            if (klines.length < 30) continue;
+
+            pairStats[sym] = { wins: 0, losses: 0, open: 0, pnl: 0 };
+            const history = [];
+
+            for (let i = 0; i < klines.length; i++) {
+                history.push(klines[i]);
+                if (history.length > 100) history.shift();
+
+                if (history.length >= 26) {
+                    const signal = engine.analyze(sym, history);
+                    if (signal) {
+                        // Look ahead up to 20 candles for TP/SL
+                        const futureCandles = klines.slice(i + 1, i + 21);
+                        if (futureCandles.length === 0) continue;
+
+                        const trade = simulateTrade(signal, futureCandles);
+                        const pnlDollar = trade.pnl * lots;
+
+                        allTrades.push({
+                            symbol: sym.toUpperCase(),
+                            direction: signal.direction,
+                            entry: signal.price,
+                            tp: signal.direction === 'BUY' ? signal.resistance : signal.support,
+                            sl: signal.direction === 'BUY' ? signal.support : signal.resistance,
+                            exit: trade.exitPrice,
+                            result: trade.result,
+                            pnl: pnlDollar,
+                            strength: signal.strength.value,
+                            riskLevel: signal.riskLevel,
+                            time: new Date(klines[i].time).toLocaleString('es-CO', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                        });
+
+                        if (trade.result === 'tp') pairStats[sym].wins++;
+                        else if (trade.result === 'sl') pairStats[sym].losses++;
+                        else pairStats[sym].open++;
+                        pairStats[sym].pnl += pnlDollar;
+
+                        // Skip ahead to avoid overlapping signals
+                        i += 5;
+                    }
+                }
+            }
+        }
+
+        document.getElementById('btProgressBar').style.width = '100%';
+        document.getElementById('btProgressText').textContent = 'Completado!';
+
+        // Calculate results
+        const totalTrades = allTrades.length;
+        const wins = allTrades.filter(t => t.result === 'tp').length;
+        const losses = allTrades.filter(t => t.result === 'sl').length;
+        const totalPnl = allTrades.reduce((sum, t) => sum + t.pnl, 0);
+        const winRate = totalTrades > 0 ? ((wins / (wins + losses)) * 100).toFixed(1) : 0;
+
+        // Find best pair
+        let bestPair = '—';
+        let bestPnl = -Infinity;
+        for (const [sym, stats] of Object.entries(pairStats)) {
+            if (stats.pnl > bestPnl) { bestPnl = stats.pnl; bestPair = sym.toUpperCase().replace('USDT', ''); }
+        }
+
+        // Update stats
+        document.getElementById('btTotalSignals').textContent = totalTrades;
+        const winRateEl = document.getElementById('btWinRate');
+        winRateEl.textContent = winRate + '%';
+        winRateEl.className = `text-xl font-bold font-mono ${parseFloat(winRate) >= 50 ? 'text-[#00ff41]' : 'text-red-400'}`;
+        const pnlEl = document.getElementById('btPnL');
+        pnlEl.textContent = (totalPnl >= 0 ? '+' : '') + '$' + totalPnl.toFixed(2);
+        pnlEl.className = `text-xl font-bold font-mono ${totalPnl >= 0 ? 'text-[#00ff41]' : 'text-red-400'}`;
+        document.getElementById('btBestPair').textContent = bestPair;
+
+        // Render trade list
+        const tradeList = document.getElementById('btTradeList');
+        tradeList.innerHTML = allTrades.map(t => {
+            const isBuy = t.direction === 'BUY';
+            const resultColor = t.result === 'tp' ? 'text-[#00ff41]' : t.result === 'sl' ? 'text-red-400' : 'text-gray-500';
+            const resultIcon = t.result === 'tp' ? 'check-circle' : t.result === 'sl' ? 'times-circle' : 'minus-circle';
+            const pnlColor = t.pnl >= 0 ? 'text-[#00ff41]' : 'text-red-400';
+            return `
+                <div class="flex items-center justify-between py-1.5 px-2 rounded-lg bg-gray-800/30 text-[11px]">
+                    <div class="flex items-center gap-2">
+                        <i class="fas fa-${resultIcon} ${resultColor}"></i>
+                        <span class="px-1.5 py-0.5 rounded text-[9px] font-bold ${isBuy ? 'bg-[#00ff41]/10 text-[#00ff41]' : 'bg-red-500/10 text-red-400'}">${t.direction}</span>
+                        <span class="text-white font-medium">${t.symbol}</span>
+                        <span class="text-gray-600">${t.time}</span>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <span class="text-gray-500 font-mono">${formatPrice(t.entry)} → ${formatPrice(t.exit)}</span>
+                        <span class="font-mono font-bold ${pnlColor}">${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)}</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        // Show results
+        setTimeout(() => {
+            document.getElementById('btProgress').classList.add('hidden');
+            document.getElementById('btStats').classList.remove('hidden');
+            document.getElementById('btDetail').classList.remove('hidden');
+        }, 500);
+
+        console.log(`🧪 Backtest completado: ${totalTrades} señales, ${winRate}% win rate, P&L: $${totalPnl.toFixed(2)}`);
+
+    } catch (e) {
+        console.error('Error en backtest:', e);
+        document.getElementById('btProgressText').textContent = 'Error: ' + e.message;
+    }
+
+    btRunning = false;
+    document.getElementById('btRunBtn').innerHTML = '<i class="fas fa-play"></i> Ejecutar Backtest';
+}
+
+// ==================== TIMEFRAME ANALYSIS ====================
+async function runTimeframeAnalysis() {
+    if (btRunning) return;
+    btRunning = true;
+
+    const intervals = ['1m', '5m', '15m', '1h'];
+    const candleCounts = { '1m': 500, '5m': 500, '15m': 500, '1h': 300 };
+    const results = {};
+    const testSymbols = ['btcusdt', 'ethusdt', 'solusdt'];
+
+    document.getElementById('btProgress').classList.remove('hidden');
+    document.getElementById('btTimeframeResults').classList.add('hidden');
+    document.getElementById('btAnalyzeBtn').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analizando...';
+
+    try {
+        for (let ii = 0; ii < intervals.length; ii++) {
+            const interval = intervals[ii];
+            document.getElementById('btProgressText').textContent = `Probando ${interval}... (${ii + 1}/${intervals.length})`;
+            document.getElementById('btProgressBar').style.width = `${((ii) / intervals.length) * 100}%`;
+
+            const engine = new SignalEngine();
+            let wins = 0, losses = 0, totalPnl = 0, totalSignals = 0;
+
+            for (const sym of testSymbols) {
+                const klines = await fetchBacktestKlines(sym, interval, candleCounts[interval]);
+                if (klines.length < 30) continue;
+
+                const history = [];
+                for (let i = 0; i < klines.length; i++) {
+                    history.push(klines[i]);
+                    if (history.length > 100) history.shift();
+
+                    if (history.length >= 26) {
+                        const signal = engine.analyze(sym, history);
+                        if (signal) {
+                            const futureCandles = klines.slice(i + 1, i + 21);
+                            if (futureCandles.length === 0) continue;
+                            const trade = simulateTrade(signal, futureCandles);
+                            totalSignals++;
+                            if (trade.result === 'tp') wins++;
+                            else if (trade.result === 'sl') losses++;
+                            totalPnl += trade.pnl * 0.03;
+                            i += 5;
+                        }
+                    }
+                }
+            }
+
+            const decided = wins + losses;
+            results[interval] = {
+                signals: totalSignals,
+                wins,
+                losses,
+                winRate: decided > 0 ? ((wins / decided) * 100).toFixed(1) : 0,
+                pnl: totalPnl
+            };
+        }
+
+        document.getElementById('btProgressBar').style.width = '100%';
+
+        // Render timeframe comparison
+        const grid = document.getElementById('btTimeframeGrid');
+        let bestInterval = '1m';
+        let bestScore = -Infinity;
+
+        grid.innerHTML = intervals.map(tf => {
+            const r = results[tf];
+            const wr = parseFloat(r.winRate);
+            // Score = winRate * 0.7 + (positive pnl bonus) * 0.3
+            const score = wr * 0.7 + (r.pnl > 0 ? 30 : 0);
+            if (score > bestScore) { bestScore = score; bestInterval = tf; }
+
+            return `
+                <div class="glass-card rounded-xl p-3 text-center ${tf === bestInterval ? 'border border-[#00ff41]/30' : ''}">
+                    <p class="text-white font-bold text-lg mb-1">${tf}</p>
+                    <p class="text-[10px] text-gray-500 mb-2">${r.signals} señales</p>
+                    <p class="text-lg font-bold font-mono ${wr >= 50 ? 'text-[#00ff41]' : 'text-red-400'}">${r.winRate}%</p>
+                    <p class="text-[10px] text-gray-500">Win Rate</p>
+                    <p class="text-xs font-mono mt-1 ${r.pnl >= 0 ? 'text-[#00ff41]' : 'text-red-400'}">${r.pnl >= 0 ? '+' : ''}$${r.pnl.toFixed(2)}</p>
+                    <p class="text-[9px] text-gray-600">P&L (0.03 lots)</p>
+                </div>
+            `;
+        }).join('');
+
+        // Re-render to apply best border after we know the actual best
+        grid.innerHTML = intervals.map(tf => {
+            const r = results[tf];
+            const wr = parseFloat(r.winRate);
+            const isBest = tf === bestInterval;
+            return `
+                <div class="glass-card rounded-xl p-3 text-center ${isBest ? 'border border-[#00ff41]/40 bg-[#00ff41]/5' : ''}">
+                    <p class="text-white font-bold text-lg mb-1">${tf} ${isBest ? '⭐' : ''}</p>
+                    <p class="text-[10px] text-gray-500 mb-2">${r.signals} señales</p>
+                    <p class="text-lg font-bold font-mono ${wr >= 50 ? 'text-[#00ff41]' : 'text-red-400'}">${r.winRate}%</p>
+                    <p class="text-[10px] text-gray-500">Win Rate</p>
+                    <p class="text-xs font-mono mt-1 ${r.pnl >= 0 ? 'text-[#00ff41]' : 'text-red-400'}">${r.pnl >= 0 ? '+' : ''}$${r.pnl.toFixed(2)}</p>
+                    <p class="text-[9px] text-gray-600">P&L (0.03 lots)</p>
+                </div>
+            `;
+        }).join('');
+
+        // Show recommendation
+        document.getElementById('btTimeframeRec').innerHTML = `
+            <div class="bg-[#00ff41]/5 border border-[#00ff41]/20 rounded-xl p-3 mt-3">
+                <p class="text-[#00ff41] text-xs font-bold flex items-center justify-center gap-2">
+                    <i class="fas fa-star"></i> Temporalidad recomendada: ${bestInterval}
+                </p>
+                <p class="text-gray-400 text-[10px] mt-1">Basado en win rate y P&L simulado con BTC, ETH y SOL en las últimas ${candleCounts[bestInterval]} velas.</p>
+                <button onclick="changeTimeframe('${bestInterval}')" class="mt-2 px-4 py-1.5 text-[10px] font-bold rounded-lg bg-[#00ff41]/20 text-[#00ff41] hover:bg-[#00ff41]/30 transition">
+                    <i class="fas fa-bolt mr-1"></i> Cambiar a ${bestInterval} ahora
+                </button>
+            </div>
+        `;
+
+        setTimeout(() => {
+            document.getElementById('btProgress').classList.add('hidden');
+            document.getElementById('btTimeframeResults').classList.remove('hidden');
+        }, 300);
+
+        console.log(`⏱️ Análisis de temporalidades completado. Mejor: ${bestInterval} (${results[bestInterval].winRate}% WR)`);
+
+    } catch (e) {
+        console.error('Error en análisis de temporalidades:', e);
+        document.getElementById('btProgressText').textContent = 'Error: ' + e.message;
+    }
+
+    btRunning = false;
+    document.getElementById('btAnalyzeBtn').innerHTML = '<i class="fas fa-search-plus"></i> Analizar Mejor Temporalidad';
+}
+
 console.log(`
 ╔══════════════════════════════════════════╗
-║     ⚡ AlphaSignal Pro v2.0             ║
+║     ⚡ AlphaSignal Pro v2.1             ║
 ║     Full Suite Loaded Successfully      ║
 ║     Chart + Track Record + Academia     ║
+║     Backtest + Adaptive Timeframe       ║
 ║     Telegram + Gemini AI + PWA          ║
 ╚══════════════════════════════════════════╝
 `);

@@ -43,18 +43,43 @@ let allUsers = [];
 
 auth.onAuthStateChanged(async (user) => {
     if (user) {
-        isAdmin = user.email === ADMIN_EMAIL;
+        isAdmin = (user.email || '').toLowerCase() === ADMIN_EMAIL.toLowerCase();
+        console.log('👤 User:', user.email, '| Admin:', isAdmin, '| UID:', user.uid);
+
+        // Ensure admin has a user document in Firestore
+        if (isAdmin) {
+            try {
+                const adminDoc = await db.collection('users').doc(user.uid).get();
+                if (!adminDoc.exists) {
+                    await db.collection('users').doc(user.uid).set({
+                        email: user.email,
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                        plan: 'premium',
+                        active: true,
+                        role: 'admin'
+                    });
+                    console.log('👑 Admin document created in Firestore');
+                }
+            } catch (e) { console.error('Error creating admin doc:', e); }
+        }
 
         // Check if user is approved (admin always approved)
         if (!isAdmin) {
-            const userDoc = await db.collection('users').doc(user.uid).get();
-            if (userDoc.exists && userDoc.data().active === false) {
-                auth.signOut();
-                const errorEl = document.getElementById('loginError');
-                errorEl.textContent = 'Tu cuenta está pendiente de aprobación por el administrador.';
-                errorEl.classList.remove('hidden');
-                return;
-            }
+            try {
+                const userDoc = await db.collection('users').doc(user.uid).get();
+                if (userDoc.exists) {
+                    const data = userDoc.data();
+                    if (data.active === false || data.active === 'blocked') {
+                        auth.signOut();
+                        const errorEl = document.getElementById('loginError');
+                        errorEl.textContent = data.active === 'blocked'
+                            ? 'Tu cuenta ha sido bloqueada. Contacta al administrador.'
+                            : 'Tu cuenta está pendiente de aprobación por el administrador.';
+                        errorEl.classList.remove('hidden');
+                        return;
+                    }
+                }
+            } catch (e) { console.error('Error checking user status:', e); }
         }
 
         showDashboard();
@@ -68,9 +93,11 @@ auth.onAuthStateChanged(async (user) => {
         if (isAdmin) {
             const adminTab = document.getElementById('tab-admin');
             if (adminTab) adminTab.classList.remove('hidden');
+            console.log('👑 Admin tab visible');
         }
     } else {
         showLogin();
+        isAdmin = false;
         const adminTab = document.getElementById('tab-admin');
         if (adminTab) adminTab.classList.add('hidden');
     }

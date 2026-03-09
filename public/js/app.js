@@ -98,6 +98,7 @@ auth.onAuthStateChanged(async (user) => {
         connectWebSocket();
         initAudio();
         requestNotificationPermission();
+        await loadSignalsFromFirestore();
         await loadTrackRecordFromFirestore();
         await loadLessonsFromFirestore();
 
@@ -496,6 +497,14 @@ function formatPrice(price) {
 
 // ==================== SIGNALS ====================
 function handleNewSignal(signal) {
+    // Duplicate check: skip if same symbol+direction exists within 60s
+    const isDuplicate = signals.some(s =>
+        s.symbol === signal.symbol &&
+        s.direction === signal.direction &&
+        Math.abs((s.timestamp || 0) - (signal.timestamp || Date.now())) < 60000
+    );
+    if (isDuplicate) return;
+
     signals.unshift(signal);
     if (signals.length > 50) signals = signals.slice(0, 50);
 
@@ -819,13 +828,60 @@ function triggerVisualAlert(signal) {
 // ==================== FIRESTORE ====================
 async function saveSignalToFirestore(signal) {
     try {
-        await db.collection('signals').add({
+        const docId = signal.id || `${signal.symbol}_${signal.direction}_${Date.now()}`;
+        await db.collection('signals').doc(docId).set({
             ...signal,
             timestamp: firebase.firestore.FieldValue.serverTimestamp(),
             userId: auth.currentUser?.uid
         });
     } catch (error) {
         console.error('Error saving signal to Firestore:', error);
+    }
+}
+
+async function loadSignalsFromFirestore() {
+    try {
+        const cutoff = new Date();
+        cutoff.setHours(cutoff.getHours() - 24);
+
+        const snap = await db.collection('signals')
+            .where('timestamp', '>', cutoff)
+            .orderBy('timestamp', 'desc')
+            .limit(50)
+            .get();
+
+        if (snap.empty) {
+            console.log('📭 No hay señales guardadas en las últimas 24h');
+            return;
+        }
+
+        const loaded = [];
+        snap.docs.forEach(doc => {
+            const data = doc.data();
+            // Reconstruct signal, mark expired if older than 2 min
+            const signalTime = data.timestamp?.toDate?.() || new Date(data.timestamp);
+            const ageMs = Date.now() - signalTime.getTime();
+            const expired = ageMs > 120000;
+
+            loaded.push({
+                ...data,
+                id: doc.id,
+                timestamp: signalTime.getTime(),
+                expired: expired
+            });
+        });
+
+        // Merge with existing signals (avoid duplicates by id)
+        const existingIds = new Set(signals.map(s => s.id));
+        const newSignals = loaded.filter(s => !existingIds.has(s.id));
+        signals = [...newSignals, ...signals].slice(0, 50);
+        todaySignalCount = signals.length;
+
+        renderSignals();
+        updateStats();
+        console.log(`📡 ${newSignals.length} señales cargadas desde Firestore (${loaded.length} totales en 24h)`);
+    } catch (e) {
+        console.error('Error loading signals from Firestore:', e);
     }
 }
 

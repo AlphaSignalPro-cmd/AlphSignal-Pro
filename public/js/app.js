@@ -89,12 +89,14 @@ auth.onAuthStateChanged(async (user) => {
         await loadTrackRecordFromFirestore();
         await loadLessonsFromFirestore();
 
-        // Show admin tab if admin
+        // Show admin tab if admin + run cleanup
         if (isAdmin) {
             const adminTab = document.getElementById('tab-admin');
             if (adminTab) adminTab.classList.remove('hidden');
             console.log('👑 Admin tab visible');
+            cleanupOldSignals();
         }
+        cleanupOldTrackRecord();
     } else {
         showLogin();
         isAdmin = false;
@@ -795,6 +797,52 @@ async function saveSignalToFirestore(signal) {
         });
     } catch (error) {
         console.error('Error saving signal to Firestore:', error);
+    }
+}
+
+// Auto-cleanup: delete signals older than 24 hours
+async function cleanupOldSignals() {
+    try {
+        const cutoff = new Date();
+        cutoff.setHours(cutoff.getHours() - 24);
+
+        const oldSignals = await db.collection('signals')
+            .where('timestamp', '<', cutoff)
+            .limit(100)
+            .get();
+
+        if (oldSignals.empty) {
+            console.log('🧹 No hay señales antiguas para limpiar');
+            return;
+        }
+
+        const batch = db.batch();
+        oldSignals.docs.forEach(doc => batch.delete(doc.ref));
+        await batch.commit();
+        console.log(`🧹 Limpieza: ${oldSignals.size} señales antiguas eliminadas`);
+    } catch (e) {
+        console.error('Error cleaning up signals:', e);
+    }
+}
+
+// Cleanup old track record entries (keep only last 200 per user)
+async function cleanupOldTrackRecord() {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    try {
+        const snap = await db.collection('users').doc(uid).collection('trackRecord')
+            .orderBy('timestamp', 'desc')
+            .get();
+
+        if (snap.size <= 200) return;
+
+        const toDelete = snap.docs.slice(200);
+        const batch = db.batch();
+        toDelete.forEach(doc => batch.delete(doc.ref));
+        await batch.commit();
+        console.log(`🧹 Track record limpiado: ${toDelete.length} entradas antiguas eliminadas`);
+    } catch (e) {
+        console.error('Error cleaning track record:', e);
     }
 }
 

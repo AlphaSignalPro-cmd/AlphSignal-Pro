@@ -183,6 +183,22 @@
                 </div>
             </div>
 
+            <!-- XM Guide Banner -->
+            <div id="xmGuideBanner" class="glass-card rounded-xl p-4 border border-blue-500/20 bg-gradient-to-r from-blue-900/20 to-purple-900/20 cursor-pointer hover:border-blue-500/40 transition" onclick="toggleXmGuide()">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-blue-600/20 flex items-center justify-center shrink-0">
+                            <i class="fas fa-book-open text-blue-400"></i>
+                        </div>
+                        <div>
+                            <p class="text-white text-sm font-semibold">¿Quieres aprender a operar paso a paso?</p>
+                            <p class="text-gray-400 text-[11px]">Te explicamos cómo usar cada señal en tu app de trading (basado en XM)</p>
+                        </div>
+                    </div>
+                    <i class="fas fa-chevron-right text-blue-400 text-sm"></i>
+                </div>
+            </div>
+
             <!-- Two column layout -->
             <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
 
@@ -975,6 +991,198 @@
                         </ul>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== XM TRADING GUIDE MODAL ==================== -->
+    <div id="xmGuideModal" class="fixed inset-0 bg-black/85 backdrop-blur-sm z-[70] hidden flex items-center justify-center p-4">
+        <div class="glass-card rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <div class="sticky top-0 bg-[#12121a] p-5 border-b border-gray-800/50 flex items-center justify-between rounded-t-2xl z-10">
+                <div>
+                    <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                        <i class="fas fa-book-open text-[#00ff41]"></i>
+                        Cómo operar paso a paso
+                    </h2>
+                    <p class="text-gray-500 text-xs mt-1">Guía basada en la app XM (puede variar en otras apps)</p>
+                </div>
+                <button onclick="toggleXmGuide()" class="text-gray-400 hover:text-white transition">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+
+            <div class="p-5 space-y-5">
+
+                <!-- Step 1 -->
+                <div class="space-y-2">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-full bg-[#00ff41] flex items-center justify-center text-black font-bold text-sm shrink-0">1</div>
+                        <h3 class="text-white font-bold text-sm">Abre la app XM y ve a "Mercados"</h3>
+                    </div>
+                    <div class="ml-11 bg-[#1a1a2e]/60 rounded-xl p-4 border border-gray-800/50 space-y-2">
+                        <p class="text-gray-300 text-xs leading-relaxed">En la parte de abajo de la pantalla vas a ver un menú. Toca donde dice <strong class="text-white">"Mercados"</strong> (tiene un ícono de check).</p>
+                        <p class="text-gray-300 text-xs leading-relaxed">Arriba verás categorías: <strong class="text-blue-400">Popular</strong>, <strong class="text-blue-400">Forex</strong>, <strong class="text-blue-400">CFD de acciones</strong>, etc.</p>
+                        <p class="text-gray-300 text-xs leading-relaxed">Las criptomonedas están dentro de la categoría que dice <strong class="text-amber-400">"Criptomonedas"</strong> o puedes buscarlas con la lupa 🔍.</p>
+                    </div>
+                </div>
+
+                <!-- Step 2 -->
+                <div class="space-y-2">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-full bg-[#00ff41] flex items-center justify-center text-black font-bold text-sm shrink-0">2</div>
+                        <h3 class="text-white font-bold text-sm">Busca el par que te indicó AlphaSignal</h3>
+                    </div>
+                    <div class="ml-11 bg-[#1a1a2e]/60 rounded-xl p-4 border border-gray-800/50 space-y-2">
+                        <p class="text-gray-300 text-xs leading-relaxed">Si AlphaSignal dice <strong class="text-[#00ff41]">BTCUSDT</strong>, en XM busca <strong class="text-white">BTCUSD</strong> (sin la T al final, es lo mismo).</p>
+                        <div class="bg-gray-800/50 rounded-lg p-3 space-y-1">
+                            <p class="text-[10px] text-gray-500 uppercase font-bold">Equivalencias rápidas:</p>
+                            <div class="grid grid-cols-2 gap-1 text-[11px]">
+                                <span class="text-gray-400">BTCUSDT → <strong class="text-white">BTCUSD</strong></span>
+                                <span class="text-gray-400">ETHUSDT → <strong class="text-white">ETHUSD</strong></span>
+                                <span class="text-gray-400">SOLUSDT → <strong class="text-white">SOLUSD</strong></span>
+                                <span class="text-gray-400">ADAUSDT → <strong class="text-white">ADAUSD</strong></span>
+                                <span class="text-gray-400">XRPUSDT → <strong class="text-white">XRPUSD</strong></span>
+                                <span class="text-gray-400">DOGEUSDT → <strong class="text-white">DOGEUSD</strong></span>
+                                <span class="text-gray-400">BNBUSDT → <strong class="text-white">BNBUSD</strong></span>
+                                <span class="text-gray-400">AVAXUSDT → <strong class="text-white">AVAXUSD</strong></span>
+                            </div>
+                        </div>
+                        <p class="text-gray-300 text-xs">Toca el par para abrirlo. Verás el gráfico con los botones <span class="text-red-400 font-bold">VENTA</span> y <span class="text-[#00ff41] font-bold">COMPRA</span> abajo.</p>
+                    </div>
+                </div>
+
+                <!-- Step 3 -->
+                <div class="space-y-2">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-full bg-[#00ff41] flex items-center justify-center text-black font-bold text-sm shrink-0">3</div>
+                        <h3 class="text-white font-bold text-sm">Toca COMPRA o VENTA según la señal</h3>
+                    </div>
+                    <div class="ml-11 bg-[#1a1a2e]/60 rounded-xl p-4 border border-gray-800/50 space-y-3">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div class="bg-[#00ff41]/10 border border-[#00ff41]/20 rounded-lg p-3 text-center">
+                                <i class="fas fa-arrow-up text-[#00ff41] text-xl mb-1"></i>
+                                <p class="text-[#00ff41] font-bold text-xs">Si la señal dice BUY</p>
+                                <p class="text-gray-400 text-[10px] mt-1">Toca el botón verde <strong class="text-white">COMPRA</strong></p>
+                            </div>
+                            <div class="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-center">
+                                <i class="fas fa-arrow-down text-red-400 text-xl mb-1"></i>
+                                <p class="text-red-400 font-bold text-xs">Si la señal dice SELL</p>
+                                <p class="text-gray-400 text-[10px] mt-1">Toca el botón rojo <strong class="text-white">VENTA</strong></p>
+                            </div>
+                        </div>
+                        <p class="text-gray-300 text-xs">Se abrirá una pantalla con opciones. No te asustes, te explico cada una:</p>
+                    </div>
+                </div>
+
+                <!-- Step 4 -->
+                <div class="space-y-2">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-full bg-[#00ff41] flex items-center justify-center text-black font-bold text-sm shrink-0">4</div>
+                        <h3 class="text-white font-bold text-sm">Configura la orden (lo importante)</h3>
+                    </div>
+                    <div class="ml-11 bg-[#1a1a2e]/60 rounded-xl p-4 border border-gray-800/50 space-y-3">
+
+                        <!-- Lotes -->
+                        <div class="bg-gray-800/40 rounded-lg p-3">
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="w-6 h-6 rounded bg-blue-600/20 flex items-center justify-center text-[10px]">📦</span>
+                                <p class="text-white text-xs font-bold">Lotes (cuánto arriesgar)</p>
+                            </div>
+                            <p class="text-gray-400 text-[11px] leading-relaxed">Arriba verás <strong class="text-white">Cantidad</strong> y <strong class="text-white">Lotes</strong>. Deja en <strong class="text-white">Lotes</strong>.</p>
+                            <p class="text-gray-400 text-[11px] leading-relaxed mt-1">Con $10,000 demo, usa entre <strong class="text-amber-400">0.01 y 0.05 lotes</strong> para empezar. Así si pierdes, es poquito.</p>
+                            <p class="text-gray-400 text-[11px] leading-relaxed mt-1">Usa los botones <strong class="text-white">+</strong> y <strong class="text-white">-</strong> para ajustar.</p>
+                        </div>
+
+                        <!-- Precio -->
+                        <div class="bg-gray-800/40 rounded-lg p-3">
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="w-6 h-6 rounded bg-green-600/20 flex items-center justify-center text-[10px]">💰</span>
+                                <p class="text-white text-xs font-bold">Precio</p>
+                            </div>
+                            <p class="text-gray-400 text-[11px] leading-relaxed">Deja el interruptor <strong class="text-[#00ff41]">"Compra/Vender al llegar al precio"</strong> encendido (verde). Así se ejecuta al precio actual.</p>
+                        </div>
+
+                        <!-- TP/SL -->
+                        <div class="bg-amber-900/20 border border-amber-800/30 rounded-lg p-3">
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="w-6 h-6 rounded bg-amber-600/20 flex items-center justify-center text-[10px]">🛡️</span>
+                                <p class="text-amber-400 text-xs font-bold">TP/SL (MUY IMPORTANTE)</p>
+                            </div>
+                            <p class="text-gray-400 text-[11px] leading-relaxed">Activa el interruptor <strong class="text-white">TP/SL</strong> (se pone verde).</p>
+                            <p class="text-gray-400 text-[11px] leading-relaxed mt-1">Verás dos campos:</p>
+                            <ul class="text-gray-400 text-[11px] mt-1 space-y-1 ml-2">
+                                <li>- <strong class="text-[#00ff41]">Take Profit</strong> = precio donde ganas y cierras automáticamente</li>
+                                <li>- <strong class="text-red-400">Stop Loss</strong> = precio donde pierdes poco y cierras automáticamente (tu seguro)</li>
+                            </ul>
+                            <div class="mt-2 bg-gray-900/60 rounded p-2">
+                                <p class="text-[10px] text-gray-500">Ejemplo con BUY BTCUSD a $67,000:</p>
+                                <p class="text-[10px] text-[#00ff41]">Take Profit: $67,500 (ganas $500 por lote)</p>
+                                <p class="text-[10px] text-red-400">Stop Loss: $66,700 (pierdes $300 por lote)</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 5 -->
+                <div class="space-y-2">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-full bg-[#00ff41] flex items-center justify-center text-black font-bold text-sm shrink-0">5</div>
+                        <h3 class="text-white font-bold text-sm">Toca "Colocar orden"</h3>
+                    </div>
+                    <div class="ml-11 bg-[#1a1a2e]/60 rounded-xl p-4 border border-gray-800/50 space-y-2">
+                        <p class="text-gray-300 text-xs leading-relaxed">Abajo del todo verás un botón grande:</p>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div class="bg-[#00ff41]/15 rounded-lg p-2 text-center">
+                                <p class="text-[#00ff41] text-[11px] font-bold">Colocar orden en X.XX ↗</p>
+                                <p class="text-gray-500 text-[10px]">Si es COMPRA (verde)</p>
+                            </div>
+                            <div class="bg-red-500/15 rounded-lg p-2 text-center">
+                                <p class="text-red-400 text-[11px] font-bold">Colocar orden en X.XX ↘</p>
+                                <p class="text-gray-500 text-[10px]">Si es VENTA (rojo)</p>
+                            </div>
+                        </div>
+                        <p class="text-gray-300 text-xs">¡Tócalo y listo! Tu orden está activa.</p>
+                    </div>
+                </div>
+
+                <!-- Step 6 -->
+                <div class="space-y-2">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold text-sm shrink-0">6</div>
+                        <h3 class="text-white font-bold text-sm">Revisa tu operación</h3>
+                    </div>
+                    <div class="ml-11 bg-[#1a1a2e]/60 rounded-xl p-4 border border-gray-800/50 space-y-2">
+                        <p class="text-gray-300 text-xs leading-relaxed">Ve a la pestaña <strong class="text-white">"Operaciones"</strong> en el menú de abajo de XM. Ahí verás:</p>
+                        <ul class="text-gray-400 text-[11px] space-y-1 ml-2">
+                            <li>- Tu operación abierta con PnL (ganancia/pérdida) en tiempo real</li>
+                            <li>- Si está en <span class="text-[#00ff41]">verde</span> vas ganando</li>
+                            <li>- Si está en <span class="text-red-400">rojo</span> vas perdiendo (pero tranquilo, el Stop Loss te protege)</li>
+                            <li>- Si quieres cerrar manualmente antes, toca la operación y luego <strong class="text-white">"Cerrar"</strong></li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Golden Rules -->
+                <div class="space-y-2">
+                    <div class="flex items-center gap-3">
+                        <span class="text-2xl">⚠️</span>
+                        <h3 class="text-amber-400 font-bold text-sm">Reglas de Oro</h3>
+                    </div>
+                    <div class="ml-11 bg-amber-900/10 border border-amber-800/20 rounded-xl p-4">
+                        <ul class="text-gray-300 text-[11px] space-y-2">
+                            <li class="flex items-start gap-2"><span class="text-amber-400">1.</span> <strong>SIEMPRE pon Stop Loss.</strong> Es tu cinturón de seguridad.</li>
+                            <li class="flex items-start gap-2"><span class="text-amber-400">2.</span> <strong>Empieza con lotes pequeños</strong> (0.01 - 0.05). No te arriesgues de más.</li>
+                            <li class="flex items-start gap-2"><span class="text-amber-400">3.</span> <strong>Solo opera señales verdes</strong> (semáforo verde = señal fuerte).</li>
+                            <li class="flex items-start gap-2"><span class="text-amber-400">4.</span> <strong>No operes con miedo ni ambición.</strong> Sigue el plan.</li>
+                            <li class="flex items-start gap-2"><span class="text-amber-400">5.</span> <strong>Practica en DEMO</strong> hasta sentirte seguro antes de usar dinero real.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Close button -->
+                <button onclick="toggleXmGuide()" class="w-full py-3 text-sm font-medium rounded-xl bg-[#00ff41]/10 text-[#00ff41] hover:bg-[#00ff41]/20 transition">
+                    <i class="fas fa-check-circle mr-2"></i>¡Entendido!
+                </button>
             </div>
         </div>
     </div>

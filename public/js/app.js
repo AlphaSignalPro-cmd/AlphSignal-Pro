@@ -389,7 +389,7 @@ function handleKline(data) {
         if (priceHistory[symbol].length > 100) priceHistory[symbol] = priceHistory[symbol].slice(-100);
 
         // Run signal analysis
-        if (priceHistory[symbol].length >= 26 && signalEngine) {
+        if (priceHistory[symbol].length >= 50 && signalEngine) {
             const signal = signalEngine.analyze(symbol, priceHistory[symbol]);
             if (signal) {
                 handleNewSignal(signal);
@@ -2097,7 +2097,7 @@ async function runBacktest() {
                 history.push(klines[i]);
                 if (history.length > 100) history.shift();
 
-                if (history.length >= 26) {
+                if (history.length >= 50) {
                     const signal = engine.analyze(sym, history);
                     if (signal) {
                         // Look ahead up to 20 candles for TP/SL
@@ -2233,7 +2233,7 @@ async function runTimeframeAnalysis() {
                     history.push(klines[i]);
                     if (history.length > 100) history.shift();
 
-                    if (history.length >= 26) {
+                    if (history.length >= 50) {
                         const signal = engine.analyze(sym, history);
                         if (signal) {
                             const futureCandles = klines.slice(i + 1, i + 21);

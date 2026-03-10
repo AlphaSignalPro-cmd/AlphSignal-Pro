@@ -100,6 +100,7 @@ auth.onAuthStateChanged(async (user) => {
         }
 
         showDashboard();
+        applyFavoritesToEngine();
         connectWebSocket();
         initAudio();
         requestNotificationPermission();
@@ -1215,7 +1216,7 @@ document.addEventListener('keydown', (e) => {
 
 // ==================== TAB NAVIGATION ====================
 function switchTab(tabName) {
-    const views = ['dashboard', 'chart', 'trackrecord', 'academia', 'backtest', 'config', 'admin'];
+    const views = ['dashboard', 'chart', 'trackrecord', 'academia', 'backtest', 'mercados', 'config', 'admin'];
     views.forEach(v => {
         const el = document.getElementById(`view-${v}`);
         const btn = document.getElementById(`tab-${v}`);
@@ -1227,6 +1228,7 @@ function switchTab(tabName) {
     if (tabName === 'chart' && !tvChart) initTradingViewChart();
     if (tabName === 'trackrecord') renderTrackRecord();
     if (tabName === 'academia') loadAcademiaProgress();
+    if (tabName === 'mercados') loadMarkets();
     if (tabName === 'config') { loadConfigValues(); updateTimeframeUI(); }
     if (tabName === 'admin' && isAdmin) loadAdminUsers();
 }
@@ -2030,6 +2032,184 @@ handleNewSignal = async function(signal) {
         showToast('🤖 Gemini AI ha validado la señal', 'info');
     }
 };
+
+// ==================== MERCADOS (MARKET EXPLORER) ====================
+let allMarketPairs = [];
+let marketCategory = 'favorites';
+let marketsLoaded = false;
+
+const CRYPTO_CATEGORIES = {
+    top: ['btcusdt','ethusdt','bnbusdt','solusdt','xrpusdt','dogeusdt','adausdt','avaxusdt','dotusdt','maticusdt','linkusdt','atomusdt','ltcusdt','nearusdt','aptusdt','filusdt','arbusdt','opusdt','injusdt','suiusdt'],
+    defi: ['uniusdt','aaveusdt','mkrusdt','compusdt','snxusdt','sushiusdt','crvusdt','1inchusdt','yfiusdt','ldousdt','pendleusdt','dydxusdt','gmxusdt','rndrusdt','jupusdt'],
+    layer1: ['btcusdt','ethusdt','solusdt','avaxusdt','dotusdt','atomusdt','nearusdt','aptusdt','suiusdt','algousdt','ftmusdt','egldusdt','icpusdt','hbarusdt','tonusdt','seiusdt','tiausdt'],
+    meme: ['dogeusdt','shibusdt','pepeusdt','flokiusdt','bonkusdt','wifusdt','memeusdt','1000satsusdt','bomeusdt','peopleusdt'],
+    gaming: ['axsusdt','sandusdt','manausdt','galausdt','enjusdt','imxusdt','rndrusdt','flowusdt','illusdt','pixelusdt','portalusdt']
+};
+
+function getFavorites() {
+    try {
+        return JSON.parse(localStorage.getItem('alphasignal_favorites') || '[]');
+    } catch { return []; }
+}
+
+function saveFavorites(favs) {
+    localStorage.setItem('alphasignal_favorites', JSON.stringify(favs));
+    updateFavCount();
+}
+
+function toggleFavorite(symbol) {
+    let favs = getFavorites();
+    if (favs.includes(symbol)) {
+        favs = favs.filter(f => f !== symbol);
+        showToast(`⭐ ${symbol.replace('usdt','').toUpperCase()}/USDT eliminado de favoritos`, 'info');
+    } else {
+        favs.push(symbol);
+        showToast(`⭐ ${symbol.replace('usdt','').toUpperCase()}/USDT agregado a favoritos`, 'success');
+    }
+    saveFavorites(favs);
+    renderMarkets();
+    applyFavoritesToEngine();
+}
+
+function updateFavCount() {
+    const el = document.getElementById('favCountNum');
+    if (el) el.textContent = getFavorites().length;
+}
+
+function applyFavoritesToEngine() {
+    const favs = getFavorites();
+    // Merge favorites with base SYMBOLS (no duplicates)
+    const baseSymbols = ['btcusdt','ethusdt','bnbusdt','solusdt','xrpusdt','dogeusdt','adausdt','avaxusdt','dotusdt','maticusdt','linkusdt','atomusdt','ltcusdt','nearusdt','aptusdt','filusdt','arbusdt','opusdt','injusdt','suiusdt'];
+    const merged = [...new Set([...baseSymbols, ...favs])];
+    // Update global SYMBOLS (it's const but we can modify array contents)
+    SYMBOLS.length = 0;
+    merged.forEach(s => SYMBOLS.push(s));
+    // Reconnect WebSocket to include new symbols
+    if (binanceWs && binanceWs.readyState === WebSocket.OPEN) {
+        binanceWs.onclose = null;
+        binanceWs.close();
+        connectWebSocket();
+        console.log(`🔄 WebSocket reconectado con ${SYMBOLS.length} pares`);
+    }
+}
+
+async function loadMarkets() {
+    if (marketsLoaded && allMarketPairs.length > 0) {
+        renderMarkets();
+        return;
+    }
+    const loading = document.getElementById('marketsLoading');
+    const grid = document.getElementById('marketsGrid');
+    if (loading) loading.classList.remove('hidden');
+    if (grid) grid.innerHTML = '';
+
+    try {
+        const resp = await fetch('https://api.binance.com/api/v3/ticker/24hr');
+        const data = await resp.json();
+        allMarketPairs = data
+            .filter(t => t.symbol.endsWith('USDT') && parseFloat(t.quoteVolume) > 100000)
+            .map(t => ({
+                symbol: t.symbol.toLowerCase(),
+                name: t.symbol.replace('USDT', ''),
+                price: parseFloat(t.lastPrice),
+                change: parseFloat(t.priceChangePercent),
+                volume: parseFloat(t.quoteVolume)
+            }))
+            .sort((a, b) => b.volume - a.volume);
+
+        marketsLoaded = true;
+        const countEl = document.getElementById('marketCount');
+        if (countEl) countEl.textContent = `${allMarketPairs.length} pares`;
+        updateFavCount();
+        renderMarkets();
+    } catch (e) {
+        console.error('Error loading markets:', e);
+        if (grid) grid.innerHTML = '<div class="col-span-full glass-card rounded-xl p-4 text-center"><p class="text-red-400 text-xs">Error al cargar mercados de Binance</p></div>';
+    } finally {
+        if (loading) loading.classList.add('hidden');
+    }
+}
+
+function filterMarkets() {
+    renderMarkets();
+}
+
+function filterMarketCategory(cat) {
+    marketCategory = cat;
+    // Update button styles
+    document.querySelectorAll('.market-cat-btn').forEach(btn => {
+        const id = btn.id.replace('mcat-', '');
+        const isActive = id === cat;
+        btn.className = `market-cat-btn px-3 py-1.5 text-[10px] font-medium rounded-lg border transition flex items-center gap-1.5 ${
+            isActive
+                ? (cat === 'favorites' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' : 'bg-blue-500/10 border-blue-500/30 text-blue-400')
+                : 'bg-[#1a1a2e] border-gray-700/30 text-gray-400'
+        }`;
+    });
+    renderMarkets();
+}
+
+function renderMarkets() {
+    const grid = document.getElementById('marketsGrid');
+    if (!grid) return;
+
+    const search = (document.getElementById('marketSearch')?.value || '').toLowerCase().trim();
+    const favs = getFavorites();
+    let filtered = [...allMarketPairs];
+
+    // Apply category filter
+    if (marketCategory === 'favorites') {
+        filtered = filtered.filter(p => favs.includes(p.symbol));
+    } else if (marketCategory !== 'all' && CRYPTO_CATEGORIES[marketCategory]) {
+        const catSymbols = CRYPTO_CATEGORIES[marketCategory];
+        filtered = filtered.filter(p => catSymbols.includes(p.symbol));
+    }
+
+    // Apply search
+    if (search) {
+        filtered = filtered.filter(p => p.name.toLowerCase().includes(search) || p.symbol.includes(search));
+    }
+
+    if (filtered.length === 0) {
+        grid.innerHTML = `
+            <div class="col-span-full glass-card rounded-xl p-6 text-center">
+                <i class="fas fa-${marketCategory === 'favorites' ? 'star' : 'search'} text-gray-600 text-2xl mb-2"></i>
+                <p class="text-gray-500 text-xs">${
+                    marketCategory === 'favorites'
+                        ? 'No tienes favoritos. Ve a "Todas" y agrega pares con la estrella ⭐'
+                        : 'No se encontraron pares con ese filtro'
+                }</p>
+            </div>`;
+        return;
+    }
+
+    grid.innerHTML = filtered.map(p => {
+        const isFav = favs.includes(p.symbol);
+        const isUp = p.change >= 0;
+        const volM = (p.volume / 1e6).toFixed(1);
+        return `
+            <div class="glass-card rounded-xl p-3 hover:border-gray-600/50 transition cursor-pointer group relative" onclick="toggleFavorite('${p.symbol}')">
+                <div class="absolute top-2 right-2">
+                    <i class="fas fa-star text-xs ${isFav ? 'text-amber-400' : 'text-gray-700 group-hover:text-gray-500'} transition"></i>
+                </div>
+                <div class="flex items-center gap-2 mb-2">
+                    <div class="w-7 h-7 rounded-full bg-gradient-to-br ${isUp ? 'from-[#00ff41]/20 to-[#00ff41]/5' : 'from-red-500/20 to-red-500/5'} flex items-center justify-center">
+                        <span class="text-[10px] font-bold ${isUp ? 'text-[#00ff41]' : 'text-red-400'}">${p.name.substring(0, 3)}</span>
+                    </div>
+                    <div>
+                        <p class="text-white text-[11px] font-bold">${p.name}/USDT</p>
+                        <p class="text-gray-600 text-[9px]">Vol: $${volM}M</p>
+                    </div>
+                </div>
+                <div class="flex items-center justify-between">
+                    <p class="text-white text-[11px] font-mono">${formatPrice(p.price)}</p>
+                    <span class="text-[10px] font-bold ${isUp ? 'text-[#00ff41]' : 'text-red-400'}">
+                        ${isUp ? '+' : ''}${p.change.toFixed(2)}%
+                    </span>
+                </div>
+            </div>`;
+    }).join('');
+}
 
 // ==================== TIMEFRAME SWITCHING ====================
 function updateTimeframeUI() {

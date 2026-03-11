@@ -102,14 +102,15 @@ auth.onAuthStateChanged(async (user) => {
         showDashboard();
         await loadUserConfig();
         applyFavoritesToEngine();
-        connectWebSocket();
         initAudio();
         requestNotificationPermission();
         await loadSignalsFromFirestore();
         await loadTrackRecordFromFirestore();
-        verifyPendingSignals(); // Check old unverified signals immediately
+        verifyPendingSignals();
         await loadLessonsFromFirestore();
         await loadAutoTradingState();
+        // Connect WebSocket AFTER all state is loaded (so AT is ready)
+        connectWebSocket();
 
         // Show admin tab if admin + run cleanup
         if (isAdmin) {
@@ -1780,43 +1781,66 @@ function renderTrackRecord() {
     }).join('');
 }
 
+let _perfChart = null;
+let _perfRO = null;
+
 function renderPerformanceChart(verified) {
     const container = document.getElementById('performanceChart');
-    if (!container || typeof LightweightCharts === 'undefined' || verified.length === 0) return;
+    if (!container || typeof LightweightCharts === 'undefined' || verified.length < 2) return;
 
-    container.innerHTML = '';
-    const perfChart = LightweightCharts.createChart(container, {
-        layout: { background: { color: '#0a0a0f' }, textColor: '#6b7280', fontSize: 10 },
-        grid: { vertLines: { color: 'rgba(255,255,255,0.02)' }, horzLines: { color: 'rgba(255,255,255,0.02)' } },
-        rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)' },
-        timeScale: { borderColor: 'rgba(255,255,255,0.1)', timeVisible: true },
-        handleScroll: { vertTouchDrag: false },
-    });
+    // Skip if container not visible (zero size)
+    if (container.clientWidth < 10) return;
 
-    let cumulative = 0;
-    const lineData = verified.reverse().map(t => {
-        cumulative += t.result === 'win' ? 1 : -1;
-        return { time: Math.floor(t.timestamp / 1000), value: cumulative };
-    });
+    try {
+        // Clean up previous chart
+        if (_perfChart) { _perfChart.remove(); _perfChart = null; }
+        if (_perfRO) { _perfRO.disconnect(); _perfRO = null; }
 
-    const lineSeries = perfChart.addLineSeries({
-        color: cumulative >= 0 ? '#00ff41' : '#ff3b3b',
-        lineWidth: 2,
-    });
-    lineSeries.setData(lineData);
+        container.innerHTML = '';
+        _perfChart = LightweightCharts.createChart(container, {
+            layout: { background: { color: '#0a0a0f' }, textColor: '#6b7280', fontSize: 10 },
+            grid: { vertLines: { color: 'rgba(255,255,255,0.02)' }, horzLines: { color: 'rgba(255,255,255,0.02)' } },
+            rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)' },
+            timeScale: { borderColor: 'rgba(255,255,255,0.1)', timeVisible: true },
+            handleScroll: { vertTouchDrag: false },
+        });
 
-    // Zero line
-    const zeroLine = perfChart.addLineSeries({ color: 'rgba(255,255,255,0.1)', lineWidth: 1, lineStyle: 2 });
-    if (lineData.length >= 2) {
+        // Sort ascending by timestamp (don't mutate original)
+        const sorted = [...verified].sort((a, b) => a.timestamp - b.timestamp);
+
+        let cumulative = 0;
+        let lastTime = 0;
+        const lineData = [];
+        for (const t of sorted) {
+            cumulative += t.result === 'win' ? 1 : -1;
+            let time = Math.floor(t.timestamp / 1000);
+            // Ensure strictly ascending times (add 1s for duplicates)
+            if (time <= lastTime) time = lastTime + 1;
+            lastTime = time;
+            lineData.push({ time, value: cumulative });
+        }
+
+        if (lineData.length < 2) return;
+
+        const lineSeries = _perfChart.addLineSeries({
+            color: cumulative >= 0 ? '#00ff41' : '#ff3b3b',
+            lineWidth: 2,
+        });
+        lineSeries.setData(lineData);
+
+        // Zero line
+        const zeroLine = _perfChart.addLineSeries({ color: 'rgba(255,255,255,0.1)', lineWidth: 1, lineStyle: 2 });
         zeroLine.setData([
             { time: lineData[0].time, value: 0 },
             { time: lineData[lineData.length - 1].time, value: 0 },
         ]);
-    }
 
-    perfChart.timeScale().fitContent();
-    const ro = new ResizeObserver(() => perfChart.applyOptions({ width: container.clientWidth }));
-    ro.observe(container);
+        _perfChart.timeScale().fitContent();
+        _perfRO = new ResizeObserver(() => { if (_perfChart) _perfChart.applyOptions({ width: container.clientWidth }); });
+        _perfRO.observe(container);
+    } catch (e) {
+        console.warn('Performance chart error:', e.message);
+    }
 }
 
 async function clearTrackRecord() {
@@ -2010,15 +2034,17 @@ async function saveGeminiConfig() {
 }
 
 let _lastGeminiCall = 0;
-const GEMINI_COOLDOWN = 30000; // 30 seconds between calls
+let _geminiInFlight = false;
+const GEMINI_COOLDOWN = 60000; // 60 seconds between calls
 
 async function validateSignalWithGemini(signal) {
     const key = localStorage.getItem('alphaGeminiKey');
     if (!key) return null;
 
-    // Throttle: max 1 call per 30 seconds
+    // Throttle: max 1 call per 60 seconds + no concurrent calls
     const now = Date.now();
-    if (now - _lastGeminiCall < GEMINI_COOLDOWN) return null;
+    if (_geminiInFlight || (now - _lastGeminiCall < GEMINI_COOLDOWN)) return null;
+    _geminiInFlight = true;
     _lastGeminiCall = now;
 
     const prompt = `Eres un analista de trading experto. Analiza esta señal de trading y responde en español con máximo 2 oraciones simples:
@@ -2037,12 +2063,13 @@ Riesgo: ${signal.riskLevel}
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
         });
-        if (!resp.ok) return null; // Don't log 429 errors
+        if (!resp.ok) return null;
         const data = await resp.json();
         return data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
     } catch (e) {
-        console.error('Gemini error:', e);
         return null;
+    } finally {
+        _geminiInFlight = false;
     }
 }
 
@@ -2421,7 +2448,12 @@ function paperTradeSignal(signal) {
     const positionValue = quantity * price;
 
     // Don't open if position value exceeds 50% of balance
-    if (positionValue > paperBalance * 0.5) return;
+    if (positionValue > paperBalance * 0.5) {
+        console.log(`🤖 AT rechazó ${signal.symbol}: valor posición $${positionValue.toFixed(2)} > 50% balance $${(paperBalance * 0.5).toFixed(2)}`);
+        return;
+    }
+
+    console.log(`🤖 ✅ AT abriendo ${signal.direction} ${signal.symbol} @ ${price} | TP: ${tp} | SL: ${sl} | Cant: ${quantity.toFixed(4)} | Valor: $${positionValue.toFixed(2)}`);
 
     const position = {
         id: `pt_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
@@ -2686,7 +2718,7 @@ async function loadAutoTradingState() {
                 if (knob) knob.className = 'absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-[#00ff41] transition-all duration-300 flex items-center justify-center';
             }
 
-            console.log(`🤖 Auto Trading cargado: Balance=$${paperBalance.toFixed(2)} | Posiciones=${paperPositions.length} | Trades=${paperTrades.length}`);
+            console.log(`🤖 Auto Trading cargado: ${autoTradingEnabled ? 'ACTIVO ✅' : 'DESACTIVADO ❌'} | Balance=$${paperBalance.toFixed(2)} | Posiciones=${paperPositions.length} | Trades=${paperTrades.length}`);
         }
     } catch (e) { console.error('Error loading auto trading state:', e); }
 }

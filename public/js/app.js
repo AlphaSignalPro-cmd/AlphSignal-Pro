@@ -535,9 +535,6 @@ function handleNewSignal(signal) {
 
     // Add to history
     addToHistory(signal);
-
-    // Auto Trading: execute paper trade if enabled
-    paperTradeSignal(signal);
 }
 
 function renderSignals() {
@@ -2142,6 +2139,9 @@ if ('serviceWorker' in navigator) {
 // Override handleNewSignal to include track record, telegram, and Gemini
 const _originalHandleNewSignal = handleNewSignal;
 handleNewSignal = async function(signal) {
+    // Auto Trading: process EVERY signal (has its own duplicate position check)
+    paperTradeSignal(signal);
+
     _originalHandleNewSignal(signal);
 
     // Add to track record
@@ -2357,7 +2357,7 @@ let paperPnl = 0;
 const AT_DEFAULTS = {
     riskPercent: 2,
     maxPositions: 5,
-    minStrength: 30,
+    minStrength: 25,
     riskFilter: 'all'
 };
 
@@ -2689,14 +2689,17 @@ async function loadAutoTradingState() {
             paperPositions = Array.isArray(d.positions) ? d.positions : [];
             paperTrades = Array.isArray(d.trades) ? d.trades : [];
 
-            // Restore config UI (migrate old strict defaults)
+            // Restore config UI (force migrate old strict defaults to permissive ones)
             if (d.config) {
                 const cfg = d.config;
+                // Force override: old restrictive filters → permissive defaults
+                const minStr = (cfg.minStrength && cfg.minStrength <= 25) ? cfg.minStrength : AT_DEFAULTS.minStrength;
+                const riskF = cfg.riskFilter === 'all' ? 'all' : AT_DEFAULTS.riskFilter;
                 const sel = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
                 sel('atRiskPercent', cfg.riskPercent || AT_DEFAULTS.riskPercent);
                 sel('atMaxPositions', cfg.maxPositions || AT_DEFAULTS.maxPositions);
-                sel('atMinStrength', cfg.minStrength || AT_DEFAULTS.minStrength);
-                sel('atRiskFilter', cfg.riskFilter || AT_DEFAULTS.riskFilter);
+                sel('atMinStrength', minStr);
+                sel('atRiskFilter', riskF);
             } else {
                 // No saved config — apply defaults to UI
                 const sel = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };

@@ -2032,15 +2032,18 @@ async function saveGeminiConfig() {
 
 let _lastGeminiCall = 0;
 let _geminiInFlight = false;
-const GEMINI_COOLDOWN = 60000; // 60 seconds between calls
+let _geminiFailCount = 0;
+let _geminiDisabledUntil = 0;
 
 async function validateSignalWithGemini(signal) {
     const key = localStorage.getItem('alphaGeminiKey');
     if (!key) return null;
 
-    // Throttle: max 1 call per 60 seconds + no concurrent calls
     const now = Date.now();
-    if (_geminiInFlight || (now - _lastGeminiCall < GEMINI_COOLDOWN)) return null;
+    // Disabled after repeated failures (10 min cooldown)
+    if (now < _geminiDisabledUntil) return null;
+    // Max 1 call per 2 minutes + no concurrent calls
+    if (_geminiInFlight || (now - _lastGeminiCall < 120000)) return null;
     _geminiInFlight = true;
     _lastGeminiCall = now;
 
@@ -2060,7 +2063,15 @@ Riesgo: ${signal.riskLevel}
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
         });
-        if (!resp.ok) return null;
+        if (!resp.ok) {
+            _geminiFailCount++;
+            if (_geminiFailCount >= 3) {
+                _geminiDisabledUntil = Date.now() + 600000; // Disable 10 min
+                console.warn('⚠️ Gemini AI deshabilitado 10 min por rate limiting');
+            }
+            return null;
+        }
+        _geminiFailCount = 0; // Reset on success
         const data = await resp.json();
         return data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
     } catch (e) {
@@ -2362,12 +2373,14 @@ const AT_DEFAULTS = {
 };
 
 function getATConfig() {
-    return {
-        riskPercent: parseInt(document.getElementById('atRiskPercent')?.value || AT_DEFAULTS.riskPercent),
-        maxPositions: parseInt(document.getElementById('atMaxPositions')?.value || AT_DEFAULTS.maxPositions),
-        minStrength: parseInt(document.getElementById('atMinStrength')?.value || AT_DEFAULTS.minStrength),
-        riskFilter: document.getElementById('atRiskFilter')?.value || AT_DEFAULTS.riskFilter,
-    };
+    const rp = parseInt(document.getElementById('atRiskPercent')?.value) || AT_DEFAULTS.riskPercent;
+    const mp = parseInt(document.getElementById('atMaxPositions')?.value) || AT_DEFAULTS.maxPositions;
+    let ms = parseInt(document.getElementById('atMinStrength')?.value) || AT_DEFAULTS.minStrength;
+    let rf = document.getElementById('atRiskFilter')?.value || AT_DEFAULTS.riskFilter;
+    // Force permissive: never allow minStrength > 25 or restrictive semaphore
+    if (ms > 25) ms = 25;
+    if (rf !== 'all') rf = 'all';
+    return { riskPercent: rp, maxPositions: mp, minStrength: ms, riskFilter: rf };
 }
 
 function toggleAutoTrading() {
@@ -2431,29 +2444,33 @@ function paperTradeSignal(signal) {
     // Calculate position size based on risk
     const riskAmount = paperBalance * (cfg.riskPercent / 100);
     const price = signal.price;
-    const fallbackDist = price * 0.005;
+    const minDist = price * 0.005; // Minimum 0.5% distance for TP/SL
 
     let tp, sl;
     if (signal.direction === 'BUY') {
-        tp = signal.resistance > price ? signal.resistance : price + fallbackDist * 2;
-        sl = signal.support < price ? signal.support : price - fallbackDist;
+        tp = signal.resistance > price ? signal.resistance : price + minDist * 2;
+        sl = signal.support < price ? signal.support : price - minDist;
     } else {
-        tp = signal.support < price ? signal.support : price - fallbackDist * 2;
-        sl = signal.resistance > price ? signal.resistance : price + fallbackDist;
+        tp = signal.support < price ? signal.support : price - minDist * 2;
+        sl = signal.resistance > price ? signal.resistance : price + minDist;
     }
 
-    // Position size: risk amount / distance to SL
-    const slDist = Math.abs(price - sl);
-    const quantity = slDist > 0 ? riskAmount / slDist : riskAmount / (price * 0.01);
-    const positionValue = quantity * price;
+    // Ensure minimum SL distance of 0.5% to prevent huge position sizes
+    let slDist = Math.abs(price - sl);
+    if (slDist < minDist) slDist = minDist;
 
-    // Don't open if position value exceeds 50% of balance
-    if (positionValue > paperBalance * 0.5) {
-        console.log(`🤖 AT rechazó ${signal.symbol}: valor posición $${positionValue.toFixed(2)} > 50% balance $${(paperBalance * 0.5).toFixed(2)}`);
-        return;
+    // Position size: risk amount / distance to SL, capped at 30% of balance
+    const maxPositionValue = paperBalance * 0.3;
+    let quantity = riskAmount / slDist;
+    let positionValue = quantity * price;
+
+    // Cap position value at 30% of balance (scale down instead of rejecting)
+    if (positionValue > maxPositionValue) {
+        quantity = maxPositionValue / price;
+        positionValue = maxPositionValue;
     }
 
-    console.log(`🤖 ✅ AT abriendo ${signal.direction} ${signal.symbol} @ ${price} | TP: ${tp} | SL: ${sl} | Cant: ${quantity.toFixed(4)} | Valor: $${positionValue.toFixed(2)}`);
+    console.log(`🤖 ✅ AT abriendo ${signal.direction} ${signal.symbol} @ ${price} | TP: ${tp.toFixed(6)} | SL: ${sl.toFixed(6)} | Cant: ${quantity.toFixed(4)} | Valor: $${positionValue.toFixed(2)}`);
 
     const position = {
         id: `pt_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,

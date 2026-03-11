@@ -1452,21 +1452,21 @@ async function loadChartData() {
             high: parseFloat(k[2]),
             low: parseFloat(k[3]),
             close: parseFloat(k[4]),
-        }));
+        })).filter(c => !isNaN(c.open) && !isNaN(c.close) && c.time > 0);
 
         const volumes = data.map(k => ({
             time: Math.floor(k[0] / 1000),
             value: parseFloat(k[5]),
             color: parseFloat(k[4]) >= parseFloat(k[1]) ? 'rgba(0,255,65,0.2)' : 'rgba(255,59,59,0.2)',
-        }));
+        })).filter(v => !isNaN(v.value) && v.time > 0);
 
         if (tvCandleSeries) tvCandleSeries.setData(candles);
         if (tvVolumeSeries) tvVolumeSeries.setData(volumes);
 
         // Calculate and draw EMAs
         const closes = candles.map(c => c.close);
-        const ema9Data = calcEMAArray(closes, 9).map((v, i) => ({ time: candles[i].time, value: v })).filter(d => d.value);
-        const ema21Data = calcEMAArray(closes, 21).map((v, i) => ({ time: candles[i].time, value: v })).filter(d => d.value);
+        const ema9Data = calcEMAArray(closes, 9).map((v, i) => ({ time: candles[i].time, value: v })).filter(d => d.value !== null && !isNaN(d.value));
+        const ema21Data = calcEMAArray(closes, 21).map((v, i) => ({ time: candles[i].time, value: v })).filter(d => d.value !== null && !isNaN(d.value));
 
         if (tvEma9Series) tvEma9Series.setData(ema9Data);
         if (tvEma21Series) tvEma21Series.setData(ema21Data);
@@ -1516,10 +1516,12 @@ function connectChartWs(symbol, interval) {
                     low: parseFloat(k.l),
                     close: parseFloat(k.c),
                 };
+                if (isNaN(candle.open) || isNaN(candle.close) || !candle.time) return;
                 if (tvCandleSeries) tvCandleSeries.update(candle);
-                if (tvVolumeSeries) tvVolumeSeries.update({
+                const vol = parseFloat(k.v);
+                if (tvVolumeSeries && !isNaN(vol)) tvVolumeSeries.update({
                     time: candle.time,
-                    value: parseFloat(k.v),
+                    value: vol,
                     color: candle.close >= candle.open ? 'rgba(0,255,65,0.2)' : 'rgba(255,59,59,0.2)',
                 });
             }
@@ -2007,9 +2009,17 @@ async function saveGeminiConfig() {
     }
 }
 
+let _lastGeminiCall = 0;
+const GEMINI_COOLDOWN = 30000; // 30 seconds between calls
+
 async function validateSignalWithGemini(signal) {
     const key = localStorage.getItem('alphaGeminiKey');
     if (!key) return null;
+
+    // Throttle: max 1 call per 30 seconds
+    const now = Date.now();
+    if (now - _lastGeminiCall < GEMINI_COOLDOWN) return null;
+    _lastGeminiCall = now;
 
     const prompt = `Eres un analista de trading experto. Analiza esta señal de trading y responde en español con máximo 2 oraciones simples:
 
@@ -2027,6 +2037,7 @@ Riesgo: ${signal.riskLevel}
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
         });
+        if (!resp.ok) return null; // Don't log 429 errors
         const data = await resp.json();
         return data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
     } catch (e) {
@@ -2318,9 +2329,9 @@ let paperPnl = 0;
 
 const AT_DEFAULTS = {
     riskPercent: 2,
-    maxPositions: 3,
-    minStrength: 60,
-    riskFilter: 'green'
+    maxPositions: 5,
+    minStrength: 30,
+    riskFilter: 'all'
 };
 
 function getATConfig() {
@@ -2363,17 +2374,32 @@ function paperTradeSignal(signal) {
     const cfg = getATConfig();
 
     // Filter by strength
-    if (signal.strength.value < cfg.minStrength) return;
+    if (signal.strength.value < cfg.minStrength) {
+        console.log(`🤖 AT rechazó ${signal.symbol}: fuerza ${signal.strength.value}% < mínimo ${cfg.minStrength}%`);
+        return;
+    }
 
     // Filter by risk level (semaphore)
-    if (cfg.riskFilter === 'green' && signal.riskLevel !== 'green') return;
-    if (cfg.riskFilter === 'yellow' && signal.riskLevel === 'red') return;
+    if (cfg.riskFilter === 'green' && signal.riskLevel !== 'green') {
+        console.log(`🤖 AT rechazó ${signal.symbol}: semáforo ${signal.riskLevel} (requiere green)`);
+        return;
+    }
+    if (cfg.riskFilter === 'yellow' && signal.riskLevel === 'red') {
+        console.log(`🤖 AT rechazó ${signal.symbol}: semáforo rojo (filtro: verde+amarillo)`);
+        return;
+    }
 
     // Max positions check
-    if (paperPositions.length >= cfg.maxPositions) return;
+    if (paperPositions.length >= cfg.maxPositions) {
+        console.log(`🤖 AT rechazó ${signal.symbol}: máx. posiciones alcanzado (${cfg.maxPositions})`);
+        return;
+    }
 
     // Don't open duplicate position on same symbol+direction
-    if (paperPositions.some(p => p.symbolRaw === signal.symbolRaw && p.direction === signal.direction)) return;
+    if (paperPositions.some(p => p.symbolRaw === signal.symbolRaw && p.direction === signal.direction)) {
+        console.log(`🤖 AT rechazó ${signal.symbol}: posición duplicada ${signal.direction}`);
+        return;
+    }
 
     // Calculate position size based on risk
     const riskAmount = paperBalance * (cfg.riskPercent / 100);
@@ -2631,13 +2657,21 @@ async function loadAutoTradingState() {
             paperPositions = Array.isArray(d.positions) ? d.positions : [];
             paperTrades = Array.isArray(d.trades) ? d.trades : [];
 
-            // Restore config UI
+            // Restore config UI (migrate old strict defaults)
             if (d.config) {
+                const cfg = d.config;
                 const sel = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
-                sel('atRiskPercent', d.config.riskPercent || AT_DEFAULTS.riskPercent);
-                sel('atMaxPositions', d.config.maxPositions || AT_DEFAULTS.maxPositions);
-                sel('atMinStrength', d.config.minStrength || AT_DEFAULTS.minStrength);
-                sel('atRiskFilter', d.config.riskFilter || AT_DEFAULTS.riskFilter);
+                sel('atRiskPercent', cfg.riskPercent || AT_DEFAULTS.riskPercent);
+                sel('atMaxPositions', cfg.maxPositions || AT_DEFAULTS.maxPositions);
+                sel('atMinStrength', cfg.minStrength || AT_DEFAULTS.minStrength);
+                sel('atRiskFilter', cfg.riskFilter || AT_DEFAULTS.riskFilter);
+            } else {
+                // No saved config — apply defaults to UI
+                const sel = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+                sel('atRiskPercent', AT_DEFAULTS.riskPercent);
+                sel('atMaxPositions', AT_DEFAULTS.maxPositions);
+                sel('atMinStrength', AT_DEFAULTS.minStrength);
+                sel('atRiskFilter', AT_DEFAULTS.riskFilter);
             }
 
             // Restore toggle UI
@@ -2664,6 +2698,13 @@ function resetAutoTrading() {
     paperPnl = 0;
     paperPositions = [];
     paperTrades = [];
+
+    // Reset config dropdowns to optimal defaults
+    const sel = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+    sel('atRiskPercent', AT_DEFAULTS.riskPercent);
+    sel('atMaxPositions', AT_DEFAULTS.maxPositions);
+    sel('atMinStrength', AT_DEFAULTS.minStrength);
+    sel('atRiskFilter', AT_DEFAULTS.riskFilter);
 
     const toggle = document.getElementById('atToggle');
     const label = document.getElementById('atStatusLabel');

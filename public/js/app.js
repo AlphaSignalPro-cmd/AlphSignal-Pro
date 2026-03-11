@@ -109,6 +109,7 @@ auth.onAuthStateChanged(async (user) => {
         await loadTrackRecordFromFirestore();
         verifyPendingSignals(); // Check old unverified signals immediately
         await loadLessonsFromFirestore();
+        await loadAutoTradingState();
 
         // Show admin tab if admin + run cleanup
         if (isAdmin) {
@@ -533,6 +534,9 @@ function handleNewSignal(signal) {
 
     // Add to history
     addToHistory(signal);
+
+    // Auto Trading: execute paper trade if enabled
+    paperTradeSignal(signal);
 }
 
 function renderSignals() {
@@ -1208,7 +1212,7 @@ document.addEventListener('keydown', (e) => {
 
 // ==================== TAB NAVIGATION ====================
 function switchTab(tabName) {
-    const views = ['dashboard', 'chart', 'trackrecord', 'academia', 'backtest', 'mercados', 'config', 'admin'];
+    const views = ['dashboard', 'chart', 'trackrecord', 'academia', 'backtest', 'mercados', 'autotrading', 'config', 'admin'];
     views.forEach(v => {
         const el = document.getElementById(`view-${v}`);
         const btn = document.getElementById(`tab-${v}`);
@@ -1221,6 +1225,7 @@ function switchTab(tabName) {
     if (tabName === 'trackrecord') renderTrackRecord();
     if (tabName === 'academia') loadAcademiaProgress();
     if (tabName === 'mercados') loadMarkets();
+    if (tabName === 'autotrading') renderAutoTrading();
     if (tabName === 'config') { loadConfigValues(); updateTimeframeUI(); }
     if (tabName === 'admin' && isAdmin) loadAdminUsers();
 }
@@ -2304,6 +2309,379 @@ function renderMarkets() {
     }).join('');
 }
 
+// ==================== AUTO TRADING (PAPER TRADING) ====================
+let autoTradingEnabled = false;
+let paperBalance = 10000;
+let paperPositions = []; // open positions
+let paperTrades = []; // closed trades history
+let paperPnl = 0;
+
+const AT_DEFAULTS = {
+    riskPercent: 2,
+    maxPositions: 3,
+    minStrength: 60,
+    riskFilter: 'green'
+};
+
+function getATConfig() {
+    return {
+        riskPercent: parseInt(document.getElementById('atRiskPercent')?.value || AT_DEFAULTS.riskPercent),
+        maxPositions: parseInt(document.getElementById('atMaxPositions')?.value || AT_DEFAULTS.maxPositions),
+        minStrength: parseInt(document.getElementById('atMinStrength')?.value || AT_DEFAULTS.minStrength),
+        riskFilter: document.getElementById('atRiskFilter')?.value || AT_DEFAULTS.riskFilter,
+    };
+}
+
+function toggleAutoTrading() {
+    autoTradingEnabled = !autoTradingEnabled;
+    const toggle = document.getElementById('atToggle');
+    const label = document.getElementById('atStatusLabel');
+    const icon = document.getElementById('atIcon');
+    const knob = document.getElementById('atKnob');
+
+    if (autoTradingEnabled) {
+        toggle.classList.add('active');
+        label.textContent = 'ACTIVO';
+        label.className = 'text-[10px] text-[#00ff41] font-bold';
+        icon.className = 'fas fa-robot text-[8px]';
+        knob.className = 'absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-[#00ff41] transition-all duration-300 flex items-center justify-center';
+        showToast('🤖 Auto Trading ACTIVADO. El sistema operará automáticamente con cada señal.', 'success');
+    } else {
+        toggle.classList.remove('active');
+        label.textContent = 'Desactivado';
+        label.className = 'text-[10px] text-gray-500';
+        icon.className = 'fas fa-power-off text-[8px] text-gray-700';
+        knob.className = 'absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-gray-400 transition-all duration-300 flex items-center justify-center';
+        showToast('🤖 Auto Trading desactivado.', 'info');
+    }
+    saveAutoTradingState();
+}
+
+function paperTradeSignal(signal) {
+    if (!autoTradingEnabled) return;
+
+    const cfg = getATConfig();
+
+    // Filter by strength
+    if (signal.strength.value < cfg.minStrength) return;
+
+    // Filter by risk level (semaphore)
+    if (cfg.riskFilter === 'green' && signal.riskLevel !== 'green') return;
+    if (cfg.riskFilter === 'yellow' && signal.riskLevel === 'red') return;
+
+    // Max positions check
+    if (paperPositions.length >= cfg.maxPositions) return;
+
+    // Don't open duplicate position on same symbol+direction
+    if (paperPositions.some(p => p.symbolRaw === signal.symbolRaw && p.direction === signal.direction)) return;
+
+    // Calculate position size based on risk
+    const riskAmount = paperBalance * (cfg.riskPercent / 100);
+    const price = signal.price;
+    const fallbackDist = price * 0.005;
+
+    let tp, sl;
+    if (signal.direction === 'BUY') {
+        tp = signal.resistance > price ? signal.resistance : price + fallbackDist * 2;
+        sl = signal.support < price ? signal.support : price - fallbackDist;
+    } else {
+        tp = signal.support < price ? signal.support : price - fallbackDist * 2;
+        sl = signal.resistance > price ? signal.resistance : price + fallbackDist;
+    }
+
+    // Position size: risk amount / distance to SL
+    const slDist = Math.abs(price - sl);
+    const quantity = slDist > 0 ? riskAmount / slDist : riskAmount / (price * 0.01);
+    const positionValue = quantity * price;
+
+    // Don't open if position value exceeds 50% of balance
+    if (positionValue > paperBalance * 0.5) return;
+
+    const position = {
+        id: `pt_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        symbol: signal.symbol,
+        symbolRaw: signal.symbolRaw || signal.symbol.replace('/USDT', '').toLowerCase() + 'usdt',
+        direction: signal.direction,
+        entryPrice: price,
+        quantity: quantity,
+        positionValue: positionValue,
+        tp: tp,
+        sl: sl,
+        strength: signal.strength.value,
+        riskLevel: signal.riskLevel,
+        openTime: Date.now(),
+        currentPrice: price,
+        unrealizedPnl: 0,
+    };
+
+    paperPositions.push(position);
+    showToast(`🤖 Auto Trade: ${signal.direction} ${signal.symbol} @ ${formatPrice(price)} | TP: ${formatPrice(tp)} | SL: ${formatPrice(sl)}`, 'success');
+    renderAutoTrading();
+    saveAutoTradingState();
+}
+
+function checkPaperPositions() {
+    if (paperPositions.length === 0) return;
+
+    let changed = false;
+    const toClose = [];
+
+    for (const pos of paperPositions) {
+        const sym = pos.symbolRaw;
+        const livePrice = prices[sym]?.price;
+        if (!livePrice) continue;
+
+        pos.currentPrice = livePrice;
+
+        if (pos.direction === 'BUY') {
+            pos.unrealizedPnl = (livePrice - pos.entryPrice) * pos.quantity;
+            if (livePrice >= pos.tp) {
+                toClose.push({ pos, reason: 'TP Hit', exitPrice: pos.tp });
+            } else if (livePrice <= pos.sl) {
+                toClose.push({ pos, reason: 'SL Hit', exitPrice: pos.sl });
+            }
+        } else {
+            pos.unrealizedPnl = (pos.entryPrice - livePrice) * pos.quantity;
+            if (livePrice <= pos.tp) {
+                toClose.push({ pos, reason: 'TP Hit', exitPrice: pos.tp });
+            } else if (livePrice >= pos.sl) {
+                toClose.push({ pos, reason: 'SL Hit', exitPrice: pos.sl });
+            }
+        }
+        changed = true;
+    }
+
+    for (const { pos, reason, exitPrice } of toClose) {
+        closePaperPosition(pos, exitPrice, reason);
+    }
+
+    if (changed) renderAutoTrading();
+}
+
+function closePaperPosition(pos, exitPrice, reason) {
+    let pnl;
+    if (pos.direction === 'BUY') {
+        pnl = (exitPrice - pos.entryPrice) * pos.quantity;
+    } else {
+        pnl = (pos.entryPrice - exitPrice) * pos.quantity;
+    }
+
+    paperBalance += pnl;
+    paperPnl += pnl;
+
+    const trade = {
+        id: pos.id,
+        symbol: pos.symbol,
+        direction: pos.direction,
+        entryPrice: pos.entryPrice,
+        exitPrice: exitPrice,
+        quantity: pos.quantity,
+        pnl: pnl,
+        pnlPercent: ((pnl / pos.positionValue) * 100).toFixed(2),
+        reason: reason,
+        openTime: pos.openTime,
+        closeTime: Date.now(),
+        result: pnl >= 0 ? 'win' : 'loss',
+    };
+
+    paperTrades.unshift(trade);
+    paperPositions = paperPositions.filter(p => p.id !== pos.id);
+
+    const emoji = pnl >= 0 ? '✅' : '❌';
+    showToast(`${emoji} Trade cerrado: ${pos.symbol} ${reason} | PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`, pnl >= 0 ? 'success' : 'error');
+
+    renderAutoTrading();
+    saveAutoTradingState();
+}
+
+function renderAutoTrading() {
+    // Portfolio summary
+    const balEl = document.getElementById('atBalance');
+    const pnlEl = document.getElementById('atPnl');
+    const winsEl = document.getElementById('atWins');
+    const lossesEl = document.getElementById('atLosses');
+
+    const wins = paperTrades.filter(t => t.result === 'win').length;
+    const losses = paperTrades.filter(t => t.result === 'loss').length;
+    const unrealizedTotal = paperPositions.reduce((sum, p) => sum + (p.unrealizedPnl || 0), 0);
+
+    if (balEl) {
+        balEl.textContent = `$${paperBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        balEl.className = `text-lg font-bold font-mono ${paperBalance >= 10000 ? 'text-[#00ff41]' : paperBalance >= 9000 ? 'text-white' : 'text-red-400'}`;
+    }
+    if (pnlEl) {
+        const totalPnl = paperPnl + unrealizedTotal;
+        pnlEl.textContent = `${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)}`;
+        pnlEl.className = `text-lg font-bold font-mono ${totalPnl >= 0 ? 'text-[#00ff41]' : 'text-red-400'}`;
+    }
+    if (winsEl) winsEl.textContent = wins;
+    if (lossesEl) lossesEl.textContent = losses;
+
+    // Open positions
+    const openEl = document.getElementById('atOpenPositions');
+    const openCountEl = document.getElementById('atOpenCount');
+    if (openCountEl) openCountEl.textContent = paperPositions.length;
+
+    if (openEl) {
+        if (paperPositions.length === 0) {
+            openEl.innerHTML = '<p class="text-gray-600 text-[11px] text-center py-4"><i class="fas fa-inbox text-lg mb-2 block"></i>No hay posiciones abiertas. ' + (autoTradingEnabled ? 'Esperando señales...' : 'Activa el Auto Trading.') + '</p>';
+        } else {
+            openEl.innerHTML = paperPositions.map(p => {
+                const pnlColor = p.unrealizedPnl >= 0 ? 'text-[#00ff41]' : 'text-red-400';
+                const pnlSign = p.unrealizedPnl >= 0 ? '+' : '';
+                const elapsed = Math.floor((Date.now() - p.openTime) / 60000);
+                const isBuy = p.direction === 'BUY';
+                const tpDist = ((Math.abs(p.tp - p.entryPrice) / p.entryPrice) * 100).toFixed(2);
+                const slDist = ((Math.abs(p.sl - p.entryPrice) / p.entryPrice) * 100).toFixed(2);
+                return `
+                    <div class="bg-gray-800/30 border border-gray-700/30 rounded-lg p-3">
+                        <div class="flex items-center justify-between mb-2">
+                            <div class="flex items-center gap-2">
+                                <span class="px-2 py-0.5 rounded text-[10px] font-bold ${isBuy ? 'bg-[#00ff41]/15 text-[#00ff41]' : 'bg-red-500/15 text-red-400'}">${p.direction}</span>
+                                <span class="text-white text-xs font-bold">${p.symbol}</span>
+                                <span class="text-gray-500 text-[10px]">${elapsed}min</span>
+                            </div>
+                            <span class="${pnlColor} text-xs font-bold font-mono">${pnlSign}$${p.unrealizedPnl.toFixed(2)}</span>
+                        </div>
+                        <div class="grid grid-cols-4 gap-2 text-[10px]">
+                            <div><span class="text-gray-500">Entrada:</span> <span class="text-white font-mono">${formatPrice(p.entryPrice)}</span></div>
+                            <div><span class="text-gray-500">Actual:</span> <span class="text-white font-mono">${formatPrice(p.currentPrice)}</span></div>
+                            <div><span class="text-[#00ff41]">TP (${tpDist}%):</span> <span class="text-white font-mono">${formatPrice(p.tp)}</span></div>
+                            <div><span class="text-red-400">SL (${slDist}%):</span> <span class="text-white font-mono">${formatPrice(p.sl)}</span></div>
+                        </div>
+                        <div class="mt-2 w-full bg-gray-700 rounded-full h-1">
+                            ${(() => {
+                                const range = Math.abs(p.tp - p.sl);
+                                const progress = p.direction === 'BUY'
+                                    ? ((p.currentPrice - p.sl) / range) * 100
+                                    : ((p.sl - p.currentPrice) / range) * 100;
+                                const clamped = Math.max(0, Math.min(100, progress));
+                                const color = clamped > 50 ? 'bg-[#00ff41]' : 'bg-red-400';
+                                return `<div class="${color} h-1 rounded-full transition-all" style="width: ${clamped}%"></div>`;
+                            })()}
+                        </div>
+                    </div>`;
+            }).join('');
+        }
+    }
+
+    // Trade history
+    const histEl = document.getElementById('atTradeHistory');
+    const countEl = document.getElementById('atTradeCount');
+    if (countEl) countEl.textContent = `${paperTrades.length} trades`;
+
+    if (histEl) {
+        if (paperTrades.length === 0) {
+            histEl.innerHTML = '<p class="text-gray-600 text-[11px] text-center py-4"><i class="fas fa-inbox text-lg mb-2 block"></i>El historial aparecerá cuando se cierren posiciones.</p>';
+        } else {
+            histEl.innerHTML = paperTrades.slice(0, 50).map(t => {
+                const isWin = t.result === 'win';
+                const dur = Math.floor((t.closeTime - t.openTime) / 60000);
+                const time = new Date(t.closeTime).toLocaleString('es-CO', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                return `
+                    <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-gray-800/20 border border-gray-800/30">
+                        <div class="flex items-center gap-2">
+                            <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${t.direction === 'BUY' ? 'bg-[#00ff41]/15 text-[#00ff41]' : 'bg-red-500/15 text-red-400'}">${t.direction}</span>
+                            <span class="text-white text-[11px] font-medium">${t.symbol}</span>
+                            <span class="text-gray-600 text-[10px]">${dur}min</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-[10px] ${isWin ? 'text-[#00ff41]' : 'text-red-400'} font-bold font-mono">
+                                ${isWin ? '+' : ''}$${t.pnl.toFixed(2)} (${t.pnlPercent}%)
+                            </span>
+                            <span class="text-[10px] px-2 py-0.5 rounded-full ${isWin ? 'bg-[#00ff41]/10 text-[#00ff41]' : 'bg-red-500/10 text-red-400'}">${t.reason}</span>
+                            <span class="text-gray-600 text-[9px]">${time}</span>
+                        </div>
+                    </div>`;
+            }).join('');
+        }
+    }
+}
+
+async function saveAutoTradingState() {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    try {
+        await db.collection('users').doc(uid).collection('settings').doc('autotrading').set({
+            enabled: autoTradingEnabled,
+            balance: paperBalance,
+            pnl: paperPnl,
+            positions: paperPositions,
+            trades: paperTrades.slice(0, 100),
+            config: getATConfig(),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+    } catch (e) { console.error('Error saving auto trading state:', e); }
+}
+
+function saveAutoTradingConfig() {
+    saveAutoTradingState();
+}
+
+async function loadAutoTradingState() {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    try {
+        const doc = await db.collection('users').doc(uid).collection('settings').doc('autotrading').get();
+        if (doc.exists) {
+            const d = doc.data();
+            autoTradingEnabled = d.enabled || false;
+            paperBalance = d.balance ?? 10000;
+            paperPnl = d.pnl ?? 0;
+            paperPositions = Array.isArray(d.positions) ? d.positions : [];
+            paperTrades = Array.isArray(d.trades) ? d.trades : [];
+
+            // Restore config UI
+            if (d.config) {
+                const sel = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+                sel('atRiskPercent', d.config.riskPercent || AT_DEFAULTS.riskPercent);
+                sel('atMaxPositions', d.config.maxPositions || AT_DEFAULTS.maxPositions);
+                sel('atMinStrength', d.config.minStrength || AT_DEFAULTS.minStrength);
+                sel('atRiskFilter', d.config.riskFilter || AT_DEFAULTS.riskFilter);
+            }
+
+            // Restore toggle UI
+            if (autoTradingEnabled) {
+                const toggle = document.getElementById('atToggle');
+                const label = document.getElementById('atStatusLabel');
+                const icon = document.getElementById('atIcon');
+                const knob = document.getElementById('atKnob');
+                if (toggle) toggle.classList.add('active');
+                if (label) { label.textContent = 'ACTIVO'; label.className = 'text-[10px] text-[#00ff41] font-bold'; }
+                if (icon) icon.className = 'fas fa-robot text-[8px]';
+                if (knob) knob.className = 'absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-[#00ff41] transition-all duration-300 flex items-center justify-center';
+            }
+
+            console.log(`🤖 Auto Trading cargado: Balance=$${paperBalance.toFixed(2)} | Posiciones=${paperPositions.length} | Trades=${paperTrades.length}`);
+        }
+    } catch (e) { console.error('Error loading auto trading state:', e); }
+}
+
+function resetAutoTrading() {
+    if (!confirm('¿Reiniciar balance a $10,000 y borrar todo el historial de Auto Trading?')) return;
+    autoTradingEnabled = false;
+    paperBalance = 10000;
+    paperPnl = 0;
+    paperPositions = [];
+    paperTrades = [];
+
+    const toggle = document.getElementById('atToggle');
+    const label = document.getElementById('atStatusLabel');
+    const icon = document.getElementById('atIcon');
+    const knob = document.getElementById('atKnob');
+    if (toggle) toggle.classList.remove('active');
+    if (label) { label.textContent = 'Desactivado'; label.className = 'text-[10px] text-gray-500'; }
+    if (icon) icon.className = 'fas fa-power-off text-[8px] text-gray-700';
+    if (knob) knob.className = 'absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-gray-400 transition-all duration-300 flex items-center justify-center';
+
+    renderAutoTrading();
+    saveAutoTradingState();
+    showToast('🔄 Auto Trading reiniciado. Balance: $10,000', 'info');
+}
+
+// Check open positions every 3 seconds against live prices
+setInterval(checkPaperPositions, 3000);
+
 // ==================== TIMEFRAME SWITCHING ====================
 function updateTimeframeUI() {
     document.querySelectorAll('.timeframe-btn').forEach(btn => {
@@ -2718,10 +3096,11 @@ async function runTimeframeAnalysis() {
 
 console.log(`
 ╔══════════════════════════════════════════╗
-║     ⚡ AlphaSignal Pro v2.1             ║
+║     ⚡ AlphaSignal Pro v3.0             ║
 ║     Full Suite Loaded Successfully      ║
 ║     Chart + Track Record + Academia     ║
-║     Backtest + Adaptive Timeframe       ║
+║     Backtest + Mercados + Auto Trading  ║
 ║     Telegram + Gemini AI + PWA          ║
+║     Firebase Portable User Config       ║
 ╚══════════════════════════════════════════╝
 `);

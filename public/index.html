@@ -137,6 +137,9 @@
                     <button onclick="switchTab('mercados')" id="tab-mercados" class="tab-btn px-4 py-2 text-xs font-medium rounded-lg transition whitespace-nowrap flex items-center gap-1.5">
                         <i class="fas fa-globe"></i> Mercados
                     </button>
+                    <button onclick="switchTab('autotrading')" id="tab-autotrading" class="tab-btn px-4 py-2 text-xs font-medium rounded-lg transition whitespace-nowrap flex items-center gap-1.5">
+                        <i class="fas fa-robot"></i> Auto Trading
+                    </button>
                     <button onclick="switchTab('config')" id="tab-config" class="tab-btn px-4 py-2 text-xs font-medium rounded-lg transition whitespace-nowrap flex items-center gap-1.5">
                         <i class="fas fa-cog"></i> Config
                     </button>
@@ -868,6 +871,124 @@
                 <div id="marketsLoading" class="glass-card rounded-xl p-8 text-center">
                     <i class="fas fa-spinner fa-spin text-blue-400 text-2xl mb-3"></i>
                     <p class="text-gray-400 text-xs">Cargando pares de Binance...</p>
+                </div>
+            </div>
+
+            <!-- ==================== VIEW: AUTO TRADING ==================== -->
+            <div id="view-autotrading" class="hidden space-y-4">
+
+                <!-- Header + Master Toggle -->
+                <div class="glass-card rounded-xl p-4">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-sm font-semibold text-gray-300 flex items-center gap-2">
+                            <i class="fas fa-robot text-purple-400"></i>
+                            Auto Trading <span class="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-400">Paper Trading</span>
+                        </h2>
+                        <div class="flex items-center gap-2">
+                            <span id="atStatusLabel" class="text-[10px] text-gray-500">Desactivado</span>
+                            <button id="atToggle" onclick="toggleAutoTrading()" class="relative w-12 h-6 rounded-full bg-gray-700 transition-colors duration-300">
+                                <div id="atKnob" class="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-gray-400 transition-all duration-300 flex items-center justify-center">
+                                    <i id="atIcon" class="fas fa-power-off text-[8px] text-gray-700"></i>
+                                </div>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="bg-purple-500/5 border border-purple-500/10 rounded-lg p-3">
+                        <p class="text-[11px] text-gray-300"><i class="fas fa-info-circle text-purple-400 mr-1"></i> <strong class="text-purple-400">Paper Trading</strong> simula operaciones automáticas con dinero virtual. Cuando llega una señal, el sistema abre una posición automáticamente con TP y SL. Déjalo corriendo y al volver verás los resultados.</p>
+                    </div>
+                </div>
+
+                <!-- Portfolio Summary -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div class="glass-card rounded-xl p-3 text-center">
+                        <p class="text-[10px] text-gray-500 uppercase">Balance</p>
+                        <p id="atBalance" class="text-lg font-bold text-white font-mono">$10,000.00</p>
+                    </div>
+                    <div class="glass-card rounded-xl p-3 text-center">
+                        <p class="text-[10px] text-gray-500 uppercase">PnL Total</p>
+                        <p id="atPnl" class="text-lg font-bold text-gray-400 font-mono">$0.00</p>
+                    </div>
+                    <div class="glass-card rounded-xl p-3 text-center">
+                        <p class="text-[10px] text-gray-500 uppercase">Trades Ganados</p>
+                        <p id="atWins" class="text-lg font-bold text-[#00ff41] font-mono">0</p>
+                    </div>
+                    <div class="glass-card rounded-xl p-3 text-center">
+                        <p class="text-[10px] text-gray-500 uppercase">Trades Perdidos</p>
+                        <p id="atLosses" class="text-lg font-bold text-red-400 font-mono">0</p>
+                    </div>
+                </div>
+
+                <!-- Settings -->
+                <div class="glass-card rounded-xl p-4">
+                    <h3 class="text-xs font-semibold text-gray-400 mb-3 flex items-center gap-2">
+                        <i class="fas fa-sliders-h text-purple-400"></i> Configuración de Riesgo
+                    </h3>
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div>
+                            <label class="text-[10px] text-gray-500 uppercase block mb-1">Riesgo por Trade</label>
+                            <select id="atRiskPercent" onchange="saveAutoTradingConfig()" class="w-full px-2 py-2 bg-[#1a1a2e]/80 border border-gray-700/50 rounded-lg text-white text-xs focus:outline-none">
+                                <option value="1">1% del balance</option>
+                                <option value="2" selected>2% del balance</option>
+                                <option value="3">3% del balance</option>
+                                <option value="5">5% del balance</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-[10px] text-gray-500 uppercase block mb-1">Máx. Posiciones</label>
+                            <select id="atMaxPositions" onchange="saveAutoTradingConfig()" class="w-full px-2 py-2 bg-[#1a1a2e]/80 border border-gray-700/50 rounded-lg text-white text-xs focus:outline-none">
+                                <option value="3" selected>3 posiciones</option>
+                                <option value="5">5 posiciones</option>
+                                <option value="8">8 posiciones</option>
+                                <option value="10">10 posiciones</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-[10px] text-gray-500 uppercase block mb-1">Fuerza Mínima</label>
+                            <select id="atMinStrength" onchange="saveAutoTradingConfig()" class="w-full px-2 py-2 bg-[#1a1a2e]/80 border border-gray-700/50 rounded-lg text-white text-xs focus:outline-none">
+                                <option value="30">30%+ (todas)</option>
+                                <option value="45">45%+ (moderadas)</option>
+                                <option value="60" selected>60%+ (fuertes)</option>
+                                <option value="75">75%+ (muy fuertes)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-[10px] text-gray-500 uppercase block mb-1">Solo Semáforo</label>
+                            <select id="atRiskFilter" onchange="saveAutoTradingConfig()" class="w-full px-2 py-2 bg-[#1a1a2e]/80 border border-gray-700/50 rounded-lg text-white text-xs focus:outline-none">
+                                <option value="all">Todos</option>
+                                <option value="green" selected>🟢 Solo Verde</option>
+                                <option value="yellow">🟡 Verde + Amarillo</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="flex gap-2 mt-3">
+                        <button onclick="resetAutoTrading()" class="px-3 py-2 text-[10px] font-medium rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition">
+                            <i class="fas fa-undo mr-1"></i> Reiniciar Balance
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Open Positions -->
+                <div class="glass-card rounded-xl p-4">
+                    <h3 class="text-xs font-semibold text-gray-400 mb-3 flex items-center gap-2">
+                        <i class="fas fa-chart-line text-[#00ff41]"></i> Posiciones Abiertas
+                        <span id="atOpenCount" class="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400">0</span>
+                    </h3>
+                    <div id="atOpenPositions" class="space-y-2">
+                        <p class="text-gray-600 text-[11px] text-center py-4"><i class="fas fa-inbox text-lg mb-2 block"></i>No hay posiciones abiertas. Activa el Auto Trading y espera señales.</p>
+                    </div>
+                </div>
+
+                <!-- Closed Trades History -->
+                <div class="glass-card rounded-xl p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="text-xs font-semibold text-gray-400 flex items-center gap-2">
+                            <i class="fas fa-history text-amber-400"></i> Historial de Trades
+                        </h3>
+                        <span id="atTradeCount" class="text-[10px] text-gray-500">0 trades</span>
+                    </div>
+                    <div id="atTradeHistory" class="space-y-2 max-h-80 overflow-y-auto">
+                        <p class="text-gray-600 text-[11px] text-center py-4"><i class="fas fa-inbox text-lg mb-2 block"></i>El historial aparecerá cuando se cierren posiciones.</p>
+                    </div>
                 </div>
             </div>
 
